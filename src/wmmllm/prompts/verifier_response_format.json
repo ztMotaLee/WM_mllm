@@ -1,0 +1,55 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "endpoint_semantic_verification",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "state_matches_source": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "action_preserves_request": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "endpoint_matches_action": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "scene_identity_preserved": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state_matches_source",
+        "action_preserves_request",
+        "endpoint_matches_action",
+        "scene_identity_preserved",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

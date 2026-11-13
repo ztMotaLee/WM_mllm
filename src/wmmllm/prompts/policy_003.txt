@@ -1,0 +1,1 @@
+Require changed ending positions only when requested; similar endpoints can be valid. Earlier events need not appear there; images cannot prove video execution. Return pass for support, fail for clear contradiction, or uncertain for insufficient evidence, plus a reason. Indistinct faces or props are not proof of mismatch.

@@ -1,0 +1,258 @@
+{
+  "schema": "wmmllm.world.v1",
+  "id": "procedural",
+  "title": "Procedural playback fixture",
+  "procedural_fixture": true,
+  "attribution": "Procedural artwork and CPU panorama clips, drawn locally; Apache-2.0.",
+  "initial_node_id": "n0000",
+  "current_node_id": "n0002",
+  "nodes": [
+    {
+      "id": "n0000",
+      "parent_id": null,
+      "place_id": "p0000",
+      "revision": 0,
+      "pose": {
+        "hfov": 90.0,
+        "pitch": 0.0,
+        "yaw": -16.0
+      },
+      "viewport": {
+        "content_box": [
+          0,
+          0,
+          480,
+          270
+        ],
+        "height": 270,
+        "padding_ltrb": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 480
+      },
+      "panorama": "media/image0000.png",
+      "endpoint": "media/image0001.png",
+      "seam_status": "not_checked"
+    },
+    {
+      "id": "n0001",
+      "parent_id": "n0000",
+      "place_id": "p0000",
+      "revision": 0,
+      "pose": {
+        "hfov": 90.0,
+        "pitch": 0.0,
+        "yaw": 33.0
+      },
+      "viewport": {
+        "content_box": [
+          0,
+          0,
+          480,
+          270
+        ],
+        "height": 270,
+        "padding_ltrb": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 480
+      },
+      "panorama": "media/image0000.png",
+      "endpoint": "media/image0002.png",
+      "seam_status": "not_checked"
+    },
+    {
+      "id": "n0002",
+      "parent_id": "n0001",
+      "place_id": "p0000",
+      "revision": 1,
+      "pose": {
+        "hfov": 90.0,
+        "pitch": 0.0,
+        "yaw": 33.0
+      },
+      "viewport": {
+        "content_box": [
+          0,
+          0,
+          480,
+          270
+        ],
+        "height": 270,
+        "padding_ltrb": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 480
+      },
+      "panorama": "media/image0003.png",
+      "endpoint": "media/image0004.png",
+      "seam_status": "not_checked"
+    },
+    {
+      "id": "n0003",
+      "parent_id": "n0002",
+      "place_id": "p0000",
+      "revision": 1,
+      "pose": {
+        "hfov": 90.0,
+        "pitch": 0.0,
+        "yaw": -16.0
+      },
+      "viewport": {
+        "content_box": [
+          0,
+          0,
+          480,
+          270
+        ],
+        "height": 270,
+        "padding_ltrb": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 480
+      },
+      "panorama": "media/image0003.png",
+      "endpoint": "media/image0005.png",
+      "seam_status": "not_checked"
+    },
+    {
+      "id": "n0004",
+      "parent_id": "n0003",
+      "place_id": "p0001",
+      "revision": 1,
+      "pose": {
+        "hfov": 90.0,
+        "pitch": 0.0,
+        "yaw": -12.0
+      },
+      "viewport": {
+        "content_box": [
+          0,
+          0,
+          480,
+          270
+        ],
+        "height": 270,
+        "padding_ltrb": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 480
+      },
+      "panorama": "media/image0006.png",
+      "endpoint": "media/image0007.png",
+      "seam_status": "not_checked"
+    }
+  ],
+  "actions": [
+    {
+      "id": "a0001",
+      "from": "n0000",
+      "to": "n0001",
+      "label": "Look right toward the vase.",
+      "operations": [
+        "rotate"
+      ],
+      "status": "accepted",
+      "semantic": "UNCERTAIN",
+      "presentation": {
+        "kind": "rendered",
+        "video": "media/clip0001.mp4",
+        "reason": null,
+        "num_frames": 24,
+        "fps": 12,
+        "duration_seconds": 2.0
+      }
+    },
+    {
+      "id": "a0002",
+      "from": "n0001",
+      "to": "n0002",
+      "label": "Make the blue vase coral.",
+      "operations": [
+        "local_edit"
+      ],
+      "status": "accepted",
+      "semantic": "UNCERTAIN",
+      "presentation": {
+        "kind": "none",
+        "video": null,
+        "reason": "No generated video; this action uses an instant cut to its saved endpoint.",
+        "num_frames": null,
+        "fps": null,
+        "duration_seconds": null
+      }
+    },
+    {
+      "id": "a0003",
+      "from": "n0002",
+      "to": "n0003",
+      "label": "Look left toward the window.",
+      "operations": [
+        "rotate"
+      ],
+      "status": "accepted",
+      "semantic": "UNCERTAIN",
+      "presentation": {
+        "kind": "rendered",
+        "video": "media/clip0003.mp4",
+        "reason": null,
+        "num_frames": 24,
+        "fps": 12,
+        "duration_seconds": 2.0
+      }
+    },
+    {
+      "id": "a0004",
+      "from": "n0003",
+      "to": "n0004",
+      "label": "Go out to the courtyard.",
+      "operations": [
+        "navigate"
+      ],
+      "status": "accepted",
+      "semantic": "UNCERTAIN",
+      "presentation": {
+        "kind": "none",
+        "video": null,
+        "reason": "No generated video; this action uses an instant cut to its saved endpoint.",
+        "num_frames": null,
+        "fps": null,
+        "duration_seconds": null
+      }
+    },
+    {
+      "id": "a0005",
+      "from": "n0004",
+      "to": "n0002",
+      "label": "Return to the room and the coral vase.",
+      "operations": [
+        "revisit"
+      ],
+      "status": "accepted",
+      "semantic": "UNCERTAIN",
+      "presentation": {
+        "kind": "none",
+        "video": null,
+        "reason": "No generated video; this action uses an instant cut to its saved endpoint.",
+        "num_frames": null,
+        "fps": null,
+        "duration_seconds": null
+      }
+    }
+  ]
+}

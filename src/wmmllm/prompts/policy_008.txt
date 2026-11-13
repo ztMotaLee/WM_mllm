@@ -1,0 +1,1 @@
+ must describe the actual view/entities without image labels or reference-image phrases

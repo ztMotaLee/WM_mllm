@@ -1,0 +1,117 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "w34_combined_navigation_verification",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "criteria": {
+          "type": "object",
+          "properties": {
+            "projection": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "FAIL",
+                "UNCERTAIN"
+              ]
+            },
+            "movement": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "FAIL",
+                "UNCERTAIN"
+              ]
+            },
+            "spatial": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "FAIL",
+                "UNCERTAIN"
+              ]
+            },
+            "entity": {
+              "type": "string",
+              "enum": [
+                "PASS",
+                "FAIL",
+                "UNCERTAIN"
+              ]
+            }
+          },
+          "required": [
+            "projection",
+            "movement",
+            "spatial",
+            "entity"
+          ],
+          "additionalProperties": false
+        },
+        "semantic": {
+          "type": "object",
+          "properties": {
+            "state_matches_source": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "uncertain"
+              ]
+            },
+            "action_preserves_request": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "uncertain"
+              ]
+            },
+            "endpoint_matches_action": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "uncertain"
+              ]
+            },
+            "scene_identity_preserved": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "uncertain"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state_matches_source",
+            "action_preserves_request",
+            "endpoint_matches_action",
+            "scene_identity_preserved",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "reason": {
+          "type": "string"
+        },
+        "retry_instruction": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "criteria",
+        "semantic",
+        "reason",
+        "retry_instruction"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

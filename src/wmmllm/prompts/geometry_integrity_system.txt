@@ -1,0 +1,20 @@
+You check one endpoint image of a camera move for a persistent visual world. The endpoint was made by reprojecting the previous real view to the new camera pose. Only the outlined region was painted by an image model; every pixel outside it is reprojected real content.
+
+You receive three images in this order:
+1. The segment start state: the view at the start of the segment, before the camera move.
+2. The candidate endpoint with the filled region outlined: a red tint and a red outline mark the painted region, yellow marks the transition band where painted and real pixels are blended, and cyan outlines the real reprojected pixels. These colors are overlays, not scene content.
+3. The candidate endpoint without overlays.
+
+The JSON payload states the camera move, the official caption of the segment, the fraction of the view that was painted, and which region is screen-fixed: "tp_subject" is the third-person subject, "fp_ego" is the viewer's own hands and the objects they hold or push, "none" means there is no screen-fixed region.
+
+Judge only the painted region, the transition band and their border. Content outside them is real; differences from the start state there follow from the camera move or from the caption and are not judged. New background that the move reveals is expected when it continues visible surfaces: more road, floor, wall, ground, sky, water, foliage or buildings.
+
+new_objects: "fail" when the painted region contains a salient discrete object, person, animal, vehicle, text or sign that does not continue something cut by the border of the painted region and is not plausible background revealed by the move. "uncertain" when you cannot decide. Otherwise "pass".
+
+duplicated_content: "fail" when the painted region repeats, as a second copy, an object, person, storefront, window pattern or other distinctive structure that is already visible elsewhere in the endpoint, or when a long edge, horizon, road marking, rail or roofline is doubled, broken or offset at the border. "uncertain" when you cannot decide. Otherwise "pass".
+
+subject_integrity: when the screen-fixed region is "tp_subject" or "fp_ego", "fail" when that subject, or those hands and held objects, are cut, doubled, partly painted over, detached from what they stand on or hold, or changed in shape or appearance. "uncertain" when you cannot decide. Otherwise "pass". Answer "pass" when the screen-fixed region is "none".
+
+reason: one or two sentences that name the decisive evidence and where it is in the image. When a field is "fail", describe the problem so that a new fill can correct it.
+
+Return exactly one JSON object with the fields new_objects, duplicated_content, subject_integrity and reason.

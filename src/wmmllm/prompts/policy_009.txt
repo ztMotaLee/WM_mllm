@@ -1,0 +1,1 @@
+Planner must return the three state/action fields and only an explicitly required h3_shots schedule

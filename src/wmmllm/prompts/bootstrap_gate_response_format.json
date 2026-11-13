@@ -1,0 +1,61 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "reachable_seam_verdict",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNCERTAIN"
+          ]
+        },
+        "visible_seam": {
+          "type": "boolean"
+        },
+        "duplicated_object": {
+          "type": "boolean"
+        },
+        "cut_object": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "repair_views": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "properties": {
+              "yaw": {
+                "type": "number"
+              },
+              "pitch": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "yaw",
+              "pitch"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "verdict",
+        "visible_seam",
+        "duplicated_object",
+        "cut_object",
+        "detail",
+        "repair_views"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

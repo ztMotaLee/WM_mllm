@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the technical report."
+type: software
+title: "WM^MLLM: Turning MLLMs into World Models"
+authors:
+  - family-names: Li
+    given-names: Baiang
+  - family-names: Xie
+    given-names: Enze
+  - family-names: Yu
+    given-names: Jincheng
+  - family-names: Wang
+    given-names: Jin
+  - family-names: Liu
+    given-names: Haozhe
+  - family-names: Li
+    given-names: Yitong
+  - family-names: Tian
+    given-names: Juanxi
+  - family-names: Heide
+    given-names: Felix
+version: 0.1.0
+license: Apache-2.0
+repository-code: "https://github.com/ztMotaLee/WM_mllm"
+url: "https://ztmotalee.github.io/wmmllm/"
+# identifiers: add the arXiv identifier after it is assigned.
+preferred-citation:
+  type: report
+  title: "WM^MLLM: Turning MLLMs into World Models"
+  year: 2026
+  authors:
+    - family-names: Li
+      given-names: Baiang
+    - family-names: Xie
+      given-names: Enze
+    - family-names: Yu
+      given-names: Jincheng
+    - family-names: Wang
+      given-names: Jin
+    - family-names: Liu
+      given-names: Haozhe
+    - family-names: Li
+      given-names: Yitong
+    - family-names: Tian
+      given-names: Juanxi
+    - family-names: Heide
+      given-names: Felix
+  url: "https://ztmotalee.github.io/wmmllm/"

@@ -1,0 +1,6 @@
+# CPU analysis, historical composition, saved-score aggregation and tests.
+# Use a separate evaluation environment; the DA3 producer requires NumPy < 2.
+numpy>=1.26,<2
+Pillow>=10,<13
+scipy>=1.11,<2
+pytest>=8,<10

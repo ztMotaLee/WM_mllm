@@ -1,0 +1,155 @@
+{
+  "actual_support_response_format.json": {
+    "sha256": "acc14122d07a24ca1d796ee27d192ffedda8490c8d6f8dacb591dbf196c20011"
+  },
+  "actual_support_system.txt": {
+    "sha256": "c78fd3ab1ac9a765598c0a36553a4e04a26539cc185de283699c8eec57b4e115"
+  },
+  "bootstrap_camera_response_format.json": {
+    "sha256": "13702a8de0b50e6b2bb875cb95f0fac149d3201d86ad59cd9d984190c4a12401"
+  },
+  "bootstrap_camera_system.txt": {
+    "sha256": "c1ca49c79705726b3d697982e21dbf3cea3cba3c24c117cf30d4cd5952931dc7"
+  },
+  "bootstrap_context_response_format.json": {
+    "sha256": "896353ee8af30c0a2dc224e949d648f0602180621468770ed40d4fdc215c36ec"
+  },
+  "bootstrap_context_system.txt": {
+    "sha256": "16c5fd2631fcc39f9873968a9faf0ef9211f96daf6f38b3714867b68fafcdc9f"
+  },
+  "bootstrap_erp_template.txt": {
+    "sha256": "79cc364ac984bcdbc89121abfb506d463b867d1e8c84a3f3faef6a6b9c4cd661"
+  },
+  "bootstrap_gate_response_format.json": {
+    "sha256": "3ce08a78ab41bcc321194cd5866c38a6c2123fec7d6a6a159d675e8d3db32933"
+  },
+  "bootstrap_gate_system.txt": {
+    "sha256": "0fc948c1c8b069cc49830570f6aa942e9b91aca89da84171a405966f4793a76f"
+  },
+  "bootstrap_native_template.txt": {
+    "sha256": "1b5a94f7a8b91ca309ade8306c89dcfda3a08248f7d83d68ba92f8cbbbe69866"
+  },
+  "bootstrap_repair_template.txt": {
+    "sha256": "7e07d90a79478394fb308ebaf436136f2b487f786c7e2f9851582eb054ff024c"
+  },
+  "endpoint_multiple_response_format.json": {
+    "sha256": "671a3b8a03cfb207496b3c16b7473242e89c54a76b2273d05e0e602702715a62"
+  },
+  "endpoint_planner_final_bbox.txt": {
+    "sha256": "10a85b2d3d8ac629f94ae31ee13c3074e4508ac204b45938afeb21725c7490dc"
+  },
+  "endpoint_planner_scope.txt": {
+    "sha256": "cb74264c58fe1e774fdf835ed265e8e7206536b5e2815de0ddc5e09d6ab511d9"
+  },
+  "endpoint_single_response_format.json": {
+    "sha256": "30c6f50f32bcbe1c44ea2b45309f94f15f05a50c4b99d323699f6d6cf124318e"
+  },
+  "final_bbox_schema.json": {
+    "sha256": "44bdd9ca3624d746311ea35690a1e0bd11901a0b787b8089901ca0d9ab9c2485"
+  },
+  "geometry_fill_fields.json": {
+    "sha256": "c1ee49ed3677248062c28ae0a3f1668994d651cb930e49ce53e727937d488e53"
+  },
+  "geometry_fill_template.txt": {
+    "sha256": "e9c5045f8a2a57b48a04f23a74dfa0d6765992cc584d8a2eec1e1f697eea02e2"
+  },
+  "geometry_integrity_response_format.json": {
+    "sha256": "5b4368a14bd9d1e6b24e251b9b638dfa242e0ef57c80ad239efba780dca444ca"
+  },
+  "geometry_integrity_system.txt": {
+    "sha256": "857d799d13565b116f69b20c1985652aaee737c48d4f6ffb698f370a920a4534"
+  },
+  "identity_image_suffix.txt": {
+    "sha256": "0df45a825d8ce173ef74a2418b71dda0006701d4995227351a3fefb91e8bb57c"
+  },
+  "image_roles.json": {
+    "sha256": "a0c9c430883081a04f884f34db1bd4e07c8c31ed93bf715b8191b93759f46eb8"
+  },
+  "navigation_entity.txt": {
+    "sha256": "204e976ed83559f8cc1bc7d3db93eff2cf19b8259cfee5291dbc1e7227271f08"
+  },
+  "navigation_movement.txt": {
+    "sha256": "11c23db7bac2c51e199d679c417ad1f410e647f9515868311bd49d1267d0a683"
+  },
+  "navigation_projection.txt": {
+    "sha256": "cd9e104586c18c0628a15880468030b75239a2c8b1d2a423614951736e103506"
+  },
+  "navigation_response_format.json": {
+    "sha256": "0d1a811d5654c1c8c33f8b5e1741f182b6692df2196af8d1be68ec6da922effd"
+  },
+  "navigation_spatial.txt": {
+    "sha256": "6d025cd444d0b1fbf62f97bbdd8662f6cc0973548bacf0876b2db891ed91161d"
+  },
+  "observer_response_format.json": {
+    "sha256": "0a1635e9918da21ada18443c2facc2f313310898f459e7565fc73b769160e95a"
+  },
+  "observer_system.txt": {
+    "sha256": "96cabdce1ab33cd0b77de531c2de540f2f9b5fa124c371d32a556480d6594c91"
+  },
+  "operation_response_format.json": {
+    "sha256": "a01dc30086bb8f84863067aeb8357bf682145739f8c58ea783b6581065f95380"
+  },
+  "operation_system.txt": {
+    "sha256": "0fda8a79c9c63b8a288000a6f2f01d03c6c2fce45587b7db1b17d793eeb2583b"
+  },
+  "planner_base_response_format.json": {
+    "sha256": "fa05e18bafa592b305ad95bae5751f24368a590f85899f535a6b218bd7115e69"
+  },
+  "planner_multiple_response_format.json": {
+    "sha256": "580e51a1514d6222e2ebdc26e9ca4804085c6e94b6514d2e985788a43afb2371"
+  },
+  "planner_single_response_format.json": {
+    "sha256": "084d32704c81ef89bebd8de55f1b12cc714d276f4ae4b76024692c600a521a02"
+  },
+  "policy_001.txt": {
+    "sha256": "12d55ba116c0baf2391a74ea849a96cb245277743f747a25016761c978c326ac"
+  },
+  "policy_002.txt": {
+    "sha256": "b79014ee9bfaedff04f63093eefa5d3805732356300da4647291885d870a1667"
+  },
+  "policy_003.txt": {
+    "sha256": "66da6bd90ffa451445f84166342b1980a8fd30aa4b936855fd6bbc4b92486b09"
+  },
+  "policy_004.txt": {
+    "sha256": "bf747a555e733053f5b5eb26bfd109afa0986a080d6e5eabc7ba959f138cc5fc"
+  },
+  "policy_007.txt": {
+    "sha256": "63ed59f20695120bb1f18d0f1d97dbe154d6c9f6983f599ef745719723c18a2c"
+  },
+  "policy_008.txt": {
+    "sha256": "9e5e9f34b4848762240a59a2c04a6c6941e551731382ec7d6da2b0498fcc2cca"
+  },
+  "policy_009.txt": {
+    "sha256": "e62b4b03ed133340eb06b202a9b2066ab721afb0d7561a0d348f308920d522e9"
+  },
+  "policy_010.txt": {
+    "sha256": "5a52fba1b20f2f278ac8317d66f607f6ab5293675e35ed9df42f1dac0c036dad"
+  },
+  "policy_011.txt": {
+    "sha256": "3046ce9ec1d4f0a462303c4e9553a140e7d5a09df8184a7b83f056041402e1e4"
+  },
+  "policy_012.txt": {
+    "sha256": "5109ef47d35c6c8e699a6e24bc4f232ce812daa3835b239f40822d73c7e7768b"
+  },
+  "policy_013.txt": {
+    "sha256": "10187bb838053c7a568562dab1cf1d43e0318aea3e9f2acdfc2a4855412dd358"
+  },
+  "policy_014.txt": {
+    "sha256": "fc7d7981d2b9f413a47eba6ef7547b2a0136173599923200005211b951fc35fe"
+  },
+  "policy_015.txt": {
+    "sha256": "0dcc39942275caadd386a821e7a40acc4f1809587414e2402b26bcb258dc11f3"
+  },
+  "scene_context_prefix.txt": {
+    "sha256": "c04efccab06ed881491839af3efddaf2535cf18ee459b16384cd0970f29a2567"
+  },
+  "verifier_auxiliary_integrity.txt": {
+    "sha256": "13e211667b2b8bc5521528ef48fc7e9541f0118e8a53b4a3a32c1aa40ddff545"
+  },
+  "verifier_response_format.json": {
+    "sha256": "8b24df70432afc95e013fe456424c8d0a307ecb6e63bab775da2d4b5e437b3a3"
+  },
+  "verifier_simple_integrity.txt": {
+    "sha256": "ed76011b9b9a201a71ebbbcc945f9f1b8870bafdec3164419f5780018247ef71"
+  }
+}

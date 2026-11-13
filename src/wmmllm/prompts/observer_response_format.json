@@ -1,0 +1,68 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "accepted_state_memory_observation",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "facts"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "evidence",
+              "frame_indices",
+              "key",
+              "kind",
+              "label",
+              "subject_id",
+              "value"
+            ],
+            "properties": {
+              "subject_id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "appearance",
+                  "state",
+                  "location",
+                  "world"
+                ]
+              },
+              "frame_indices": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

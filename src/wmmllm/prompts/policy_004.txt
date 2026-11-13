@@ -1,0 +1,1 @@
+Check all shots against the full caption, and the endpoint against only its final shot. Earlier shots need not appear there. Require ending changes only when requested. A schedule cannot prove video execution. Return pass for support, fail for clear contradiction, or uncertain for insufficient evidence, plus a reason. Indistinct faces or props are not proof of mismatch.

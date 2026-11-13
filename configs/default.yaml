@@ -1,0 +1,31 @@
+# Supply provider endpoint values through WMM_* variables or explicit settings.
+# API keys are accepted only from the process environment or an explicitly
+# selected env file. There is no automatic env-file lookup and no model default.
+chat:
+  transport: chat_completions
+  reasoning_effort: high
+  max_output_tokens: 32000
+  timeout_seconds: 600
+image:
+  quality: high
+  view_request_size: 1792x1024
+  panorama_request_size: 2048x1024
+  view_output_size: [1344, 768]
+  panorama_output_size: [2048, 1024]
+  timeout_seconds: 420
+transport:
+  max_attempts: 5
+  base_delay_seconds: 20
+  max_delay_seconds: 160
+  jitter: 0.2
+budget:
+  max_cost_usd: null
+  # A cap requires user-supplied prices for BOTH chat and image, each containing
+  # upper_bound_usd per dispatched attempt. Optional *_usd_per_million rates
+  # replace the bound only when complete measured usage is returned.
+  prices: {}
+video:
+  backend: none
+  num_frames: 124
+  fps: 24
+  size: [1344, 768]

@@ -1,0 +1,2 @@
+# Saved-pose analysis only; DA3 extraction needs its separate NumPy<2 environment.
+numpy>=1.26,<3

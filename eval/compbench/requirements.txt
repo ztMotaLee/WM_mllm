@@ -1,0 +1,10 @@
+# Metric inference profile. Only torchmetrics has a recovered version pin.
+# This is a direct dependency list, not a verified transitive lock.
+numpy>=1.26,<2
+Pillow>=10,<13
+torch>=2.3
+torchvision>=0.18
+torchmetrics[multimodal]==1.4.3
+transformers>=4.40,<5
+pandas>=2,<3
+tqdm>=4.66

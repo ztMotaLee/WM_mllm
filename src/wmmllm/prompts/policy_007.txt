@@ -1,0 +1,1 @@
+\b(?:image|picture|photo|reference)\s*(?:#\s*)?(?:[0-9]+|one|two|three|four)\b|\b(?:first|second|third|fourth|earlier|historical|reference)\s+(?:image|picture|photo)\b

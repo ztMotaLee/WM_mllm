@@ -1,0 +1,78 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The WM^MLLM Authors -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+  <title>WM^MLLM session viewer</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/viewer.css">
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <main id="app" data-ready="false" data-busy="true" data-node-id="">
+    <header class="heading">
+      <div>
+        <p class="eyebrow">WM^MLLM · Prepared playback</p>
+        <h1 id="world-title">Session viewer</h1>
+      </div>
+      <p id="fixture" class="fixture" hidden>Procedural fixture · Prepared playback</p>
+    </header>
+
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <div class="layout">
+      <section class="view" aria-label="Panorama and transition playback">
+        <div id="stage" class="stage" aria-busy="true">
+          <canvas id="panorama" tabindex="0" role="img" aria-label="Panorama preview. Drag or swipe to look around. Arrow keys also move the camera." aria-describedby="look-help"></canvas>
+          <video id="transition" muted playsinline preload="none" disablepictureinpicture disableremoteplayback hidden aria-label="Prepared transition video"></video>
+          <div id="playback-controls" class="playback-controls" hidden>
+            <button id="play-clip" type="button" hidden>Play clip</button>
+            <button id="skip-clip" type="button">Skip to result</button>
+          </div>
+        </div>
+        <div class="view-footer">
+          <p id="node-summary">Loading world…</p>
+          <p id="camera-value" class="mono" aria-label="Camera position"></p>
+        </div>
+        <p id="look-help" class="hint">Drag or swipe to look. Use arrows or W/A/S/D while the panorama is focused. Scroll or pinch to zoom. R resets the view.</p>
+        <p id="presentation" class="presentation">Prepared panorama preview</p>
+        <p id="message" class="message" role="status" aria-live="polite">Loading manifest…</p>
+      </section>
+
+      <aside class="sidebar" aria-label="Playback controls">
+        <section class="panel" aria-labelledby="actions-title">
+          <h2 id="actions-title">Actions from this state</h2>
+          <div id="actions" class="action-list"></div>
+          <label class="skip-preference"><input id="skip-clips" type="checkbox"> Skip prepared clips</label>
+          <p id="motion-note" class="hint" hidden>Reduced motion is enabled. Uncheck this option to play clips.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="history-title">
+          <div class="section-heading">
+            <h2 id="history-title">Visited states</h2>
+            <button id="undo" type="button" disabled>Undo</button>
+          </div>
+          <p class="hint">Restore a state you have viewed. Undo also restores the exact previous camera.</p>
+          <div id="revisits" class="revisit-list"></div>
+        </section>
+
+        <details class="panel endpoint-panel" id="endpoint-panel">
+          <summary>Stored endpoint</summary>
+          <img id="endpoint" alt="Stored endpoint of the displayed state" loading="lazy" decoding="async">
+          <p class="hint">The interactive canvas renders the exported panorama preview.</p>
+        </details>
+      </aside>
+    </div>
+
+    <footer class="attribution">
+      <p id="attribution"></p>
+      <p id="recorded-final" class="mono"></p>
+    </footer>
+    <noscript>This prepared viewer requires JavaScript and WebGL2.</noscript>
+  </main>
+</body>
+</html>

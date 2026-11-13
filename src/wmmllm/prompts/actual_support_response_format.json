@@ -1,0 +1,31 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "actual_generated_edit_support",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "support_polygons": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        }
+      },
+      "required": [
+        "support_polygons"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

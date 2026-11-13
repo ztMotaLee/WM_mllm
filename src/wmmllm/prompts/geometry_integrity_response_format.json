@@ -1,0 +1,46 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "geometry_fill_integrity",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "new_objects",
+        "duplicated_content",
+        "subject_integrity",
+        "reason"
+      ],
+      "properties": {
+        "new_objects": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "duplicated_content": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "subject_integrity": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "uncertain"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "aiwm_operation_plan",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "rotate",
+                  "revisit",
+                  "navigate",
+                  "local_edit",
+                  "global_change",
+                  "subject_action"
+                ]
+              },
+              "targets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "camera_only",
+                  "local",
+                  "global"
+                ]
+              },
+              "instruction": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "operation",
+              "targets",
+              "scope",
+              "instruction"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "ending_camera": {
+          "type": "object",
+          "properties": {
+            "yaw": {
+              "type": "number"
+            },
+            "pitch": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "yaw",
+            "pitch"
+          ],
+          "additionalProperties": false
+        },
+        "editing_camera": {
+          "type": "object",
+          "properties": {
+            "yaw": {
+              "type": "number"
+            },
+            "pitch": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "yaw",
+            "pitch"
+          ],
+          "additionalProperties": false
+        },
+        "editing_hfov": {
+          "type": "number",
+          "minimum": 90,
+          "maximum": 150
+        },
+        "restore_node": {
+          "type": "string"
+        },
+        "physical_state_changed": {
+          "type": "boolean"
+        },
+        "endpoint_instruction": {
+          "type": "string"
+        },
+        "decision_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operations",
+        "ending_camera",
+        "editing_camera",
+        "editing_hfov",
+        "restore_node",
+        "physical_state_changed",
+        "endpoint_instruction",
+        "decision_reason"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

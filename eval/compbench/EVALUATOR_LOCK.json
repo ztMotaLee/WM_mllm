@@ -1,0 +1,16 @@
+{
+  "schema": "wmmllm.compbench.evaluator.v1",
+  "upstream_repository": "https://github.com/BhJia/CompBench",
+  "upstream_commit": "cb9165b01d14a321db14611afd9922c43a04665d",
+  "upstream_file": "eval_all.py",
+  "upstream_sha256": "04f622a30231c8165188dafb33050233ceb7756c69fb0454f11842373dea0e5e",
+  "portable_file": "upstream/eval_all.py",
+  "portable_sha256": "07c207a4ec2463da4154c22bcce159c49e24162dbc484acd8c8b78f09ba779c3",
+  "code_license": "MIT",
+  "torchmetrics_version": "1.4.3",
+  "changes": [
+    "Replace unused author-specific absolute defaults with explicit arguments.",
+    "Add modification and license notice; numerical code unchanged."
+  ],
+  "upstream_url_status": "verify upstream URL; recovered from local git history offline"
+}

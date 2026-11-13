@@ -1,0 +1,80 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "source_grounded_transition_action",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "current_state": {
+          "type": "string",
+          "description": "What is visibly present in Image 1 now."
+        },
+        "remaining_action": {
+          "type": "string",
+          "description": "A concise executable continuation, or a scene description when no action is requested; name entities and do not invent motion, amount or speed."
+        },
+        "endpoint_instruction": {
+          "type": "string",
+          "description": "Concrete final composition and physical state required by the current caption, including requested attributes and occlusion; identify visible people/objects without image labels."
+        },
+        "scope_bbox": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "support_polygons": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "final_view_entity_bboxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entity": {
+                "type": "string"
+              },
+              "bbox": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              }
+            },
+            "required": [
+              "entity",
+              "bbox"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "current_state",
+        "remaining_action",
+        "endpoint_instruction",
+        "scope_bbox",
+        "support_polygons",
+        "final_view_entity_bboxes"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

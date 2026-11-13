@@ -1,0 +1,1 @@
+Single-shot H3 copies the current public caption verbatim; no automatic planner bridge.

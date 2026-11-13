@@ -1,0 +1,27 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "pano_scene_bootstrap",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "scene_description": {
+          "type": "string"
+        },
+        "style_tokens": {
+          "type": "string"
+        },
+        "entity_identity_properties": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scene_description",
+        "style_tokens",
+        "entity_identity_properties"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

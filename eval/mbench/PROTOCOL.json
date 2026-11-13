@@ -1,0 +1,40 @@
+{
+  "schema": "mem6.protocol.v1",
+  "name": "MBench-A environment recovery with uniform32 DA3 producer",
+  "upstream_commit": "c44dbd9dfa0278be728bda2101b0fb96f8547f11",
+  "w30_core_scorer_sha256": "6e8520be7b43b7d56302c48617d9b4f58ba1ceb7bc2f8c85b5ae1a4e467437c3",
+  "da3": {
+    "repo": "depth-anything/DA3NESTED-GIANT-LARGE",
+    "revision": "8615eefb62f2db4f8d6ebaa59160086981672829",
+    "frames": 32,
+    "sampling": "upstream sample_bgr_frames: numpy.linspace(0,total-1,min(32,total),dtype=int), cv2 seek/decode; require 32 distinct decoded samples",
+    "joint_inference": true,
+    "process_res": 504,
+    "process_res_method": "upper_bound_resize",
+    "infer_gs": false,
+    "export_dir": null,
+    "pose_convention": "invert actual world-to-camera as float32 4x4; retain camera-to-world [:,:3,:4]; original OpenCV reference world",
+    "input_images": "save original sampled BGR pixels; official geometry reader resizes to DA3 depth shape using cv2.INTER_LINEAR",
+    "arrays": "compact 32-frame depth/intrinsics/extrinsics; no interpolation or full-frame expansion",
+    "pair_selector": "unmodified upstream find_fold_pairs with num_pairs=20, original rounding/fallback/downselection"
+  },
+  "canonical": {
+    "order": "metric.aggregate_item on native raw units, then official _project_unit_scores and _project_item_scores, then official MeanAggregator",
+    "spatial_epipolar": "exp(-mean(valid pair median_epi_dist pixels)/5)",
+    "spatial_reprojection": "exp(-mean(valid pair median_reproj pixels)/12)",
+    "rendering_lighting": "lighting_score",
+    "rendering_style": "clip(1 - mean(gram_dist),0,1)",
+    "units": "canonical score dimensionless; score_raw spatial pixels, style Gram cosine distance, lighting native lighting distance",
+    "report_percent": "multiply canonical score by 100 once for published-table comparison",
+    "trigger": "MBench-A drops trigger keys; no judge/API"
+  },
+  "runtime_adapters": [
+    "explicit user weights directory with SHA256/size verification; offline snapshot loading",
+    "reuse unchanged style bundle and DA3 instances; retain raw-before-project ordering"
+  ],
+  "limits": [
+    "The official published DA3 producer checkpoint/resize/frame policy is not fully specified. This package reproduces the documented uniform32 producer; exact published-score reproduction is unverified.",
+    "Full-frame DA3 and actual processed pixels would define a separate protocol. This package retains the frozen uniform32 sampling and original-pixel policy.",
+    "The official mean summary averages available score keys even for an invalid item. Calibration acceptance must require both item.valid and a finite score; canonical receipts remain unchanged."
+  ]
+}

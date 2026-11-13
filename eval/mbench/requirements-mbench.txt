@@ -1,0 +1,12 @@
+# Recorded direct metric dependencies. Use an isolated Python 3.10 environment.
+# Choose a compatible CPU/CUDA PyTorch wheel source explicitly.
+# Install the pinned DA3 source separately as described in README.md.
+# This file is not a complete transitive installation lock.
+torch==2.4.0
+torchvision==0.19.0
+transformers==4.57.6
+lpips==0.1.4
+numpy==1.26.4
+opencv-python==4.11.0.86
+scikit-image==0.25.2
+Pillow==12.3.0

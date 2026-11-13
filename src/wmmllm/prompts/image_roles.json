@@ -1,0 +1,8 @@
+{
+  "source": "current source",
+  "endpoint": "endpoint to verify",
+  "history": {
+    "identity": "earlier historical identity reference",
+    "initial_viewpoint": "requested initial viewpoint and identity; current physical state takes priority"
+  }
+}
