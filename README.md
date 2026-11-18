@@ -6,7 +6,7 @@ Baiang&nbsp;Li<sup>1,3</sup> &nbsp;·&nbsp; Enze&nbsp;Xie<sup>2,&dagger;</sup> &
 
 <sup>1</sup>Princeton&nbsp;University &emsp; <sup>2</sup>NVIDIA &emsp; <sup>3</sup>OpenEnvision<br><sup>&dagger;</sup>Project Lead
 
-<a href="https://baiangli.com/assets/files/wm_mllm_tr.pdf"><img src="https://img.shields.io/badge/Technical_Report-PDF-b31b1b" alt="Technical report (PDF)"></a> <a href="https://baiangli.com/wmmllm/"><img src="https://img.shields.io/badge/Project-Page-2ea44f" alt="Project page"></a> <a href="https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.0"><img src="https://img.shields.io/badge/Code-v0.1.0-1f6feb" alt="Code release v0.1.0"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+<a href="https://baiangli.com/assets/files/wm_mllm_tr.pdf"><img src="https://img.shields.io/badge/Technical_Report-PDF-b31b1b" alt="Technical report (PDF)"></a> <a href="https://baiangli.com/wmmllm/"><img src="https://img.shields.io/badge/Project-Page-2ea44f" alt="Project page"></a> <a href="https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/Code-v0.1.1-1f6feb" alt="Code release v0.1.1"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 
 <!-- TODO(arXiv): after the identifier is assigned, add this badge, and add eprint and archivePrefix to the BibTeX entry below and to CITATION.cff:
 <a href="https://arxiv.org/abs/XXXX.XXXXX"><img src="https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b" alt="arXiv"></a>
@@ -25,6 +25,7 @@ Video world models keep the world in the context of a generator, so a revisit is
 
 ## News
 
+- **2026-11-18:** Code release [v0.1.1](https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.1): the minimal implementation; you supply the API endpoint, key and models.
 - **2026-11:** The [technical report](https://baiangli.com/assets/files/wm_mllm_tr.pdf) is released.
 - **2026-11-13:** Code release [v0.1.0](https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.0).
 

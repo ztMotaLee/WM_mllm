@@ -19,7 +19,7 @@ authors:
     given-names: Juanxi
   - family-names: Heide
     given-names: Felix
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 repository-code: "https://github.com/ztMotaLee/WM_mllm"
 url: "https://baiangli.com/wmmllm/"

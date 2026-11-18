@@ -40,4 +40,4 @@ def test_cli_rejects_inline_secret_without_echo(capsys):
 
 def test_cli_version_requires_no_provider(capsys):
     with pytest.raises(SystemExit) as captured:main(['--version'])
-    assert captured.value.code==0 and capsys.readouterr().out.strip()=='0.1.0'
+    assert captured.value.code==0 and capsys.readouterr().out.strip()=='0.1.1'

@@ -3,4 +3,4 @@
 Importing the package performs no credential discovery or provider setup.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
