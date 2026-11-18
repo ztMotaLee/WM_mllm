@@ -17,9 +17,10 @@ import numpy as np
 from PIL import Image
 
 from . import projection
+from ..image_io import encode_rgb_png
+from ..session.io import (_local, array_sha256, file_ref, pixel_sha256, read_json, resolve_run_path,
+                          rgb_array, sha256_file, verify_ref, write_bytes_once, write_once)
 
-DEFAULT_PANO_SIZE = (4096, 2048)
-DEFAULT_VIEW_SIZE = (1344, 768)
 MULTIRES_SCHEMA = "wmmllm.panorama.v1"
 # Stable hash-domain identifier preserves the original canonical hash arithmetic.
 _HASH_SCHEMA = "aiwm.w34.multires_panorama.v3_immutable_render_base"
@@ -34,14 +35,6 @@ def erp_array(value: Any) -> np.ndarray:
     return rgb_array(value["erp"] if is_panorama_state(value) else value)
 
 
-def _array_sha256(value: np.ndarray) -> str:
-    array = np.ascontiguousarray(value)
-    digest = hashlib.sha256()
-    digest.update(f"{array.dtype.str} {array.shape}\n".encode("ascii"))
-    digest.update(memoryview(array).cast("B"))
-    return digest.hexdigest()
-
-
 def panorama_state_sha256(value: Any) -> str:
     if not is_panorama_state(value):
         return pixel_sha256(value)
@@ -49,17 +42,15 @@ def panorama_state_sha256(value: Any) -> str:
               "immutable_render_base_pixel_sha256": pixel_sha256(value["render_base"]),
               "viewport_profile": value["viewport_profile"],
               "patches": [{"pixel_sha256": pixel_sha256(patch["pixels"]),
-                           "alpha_sha256": _array_sha256(patch["alpha"]),
+                           "alpha_sha256": array_sha256(patch["alpha"]),
                            "camera": patch["camera"], "role": patch["role"]}
                           for patch in value["patches"]]}
     return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def create_panorama_state(pano: Any, source: Any = None, *, width: int = 4096,
-                          height: int = 2048, yaw: float = 0, pitch: float = 0,
-                          hfov: float = 90, source_metadata: Any = None,
-                          source_content_box: Any = None,
-                          padding_ltrb: Any = None) -> dict[str, Any]:
+                          height: int = 2048, source_metadata: Any = None,
+                          source_content_box: Any = None) -> dict[str, Any]:
     """Create a real multires panorama: ERP plus native geometric front texture.
 
     The source texture has a fixed world camera/frustum. Every rendered ray,
@@ -78,22 +69,15 @@ def create_panorama_state(pano: Any, source: Any = None, *, width: int = 4096,
                    "format": "fixed_screen_letterbox", "padding_ltrb": [0, 0, 0, 0]}
     else:
         full_source = rgb_array(source)
-        if padding_ltrb is not None:
-            if source_content_box is not None:
-                raise ValueError("pass padding_ltrb or source_content_box, not both")
-            left, top, right_pad, bottom_pad = map(int, padding_ltrb)
-            source_content_box = [left, top, full_source.shape[1] - right_pad,
-                                  full_source.shape[0] - bottom_pad]
         profile = source_profile(source, source_metadata=source_metadata,
                                   source_content_box=source_content_box)
         left, top, right, bottom = profile["content_box"]
         source_array = np.ascontiguousarray(full_source[top:bottom, left:right])
-        array = lift_front(pano, source_array, width=width, height=height,
-                           yaw=yaw, pitch=pitch, hfov=hfov)
+        # The official source is the front view: yaw 0, pitch 0, 90-degree HFOV.
+        array = lift_front(pano, source_array, width=width, height=height)
         patches = [{"pixels": source_array,
                     "alpha": np.ones(source_array.shape[:2], dtype=np.float32),
-                    "camera": crop_camera(yaw, pitch, hfov,
-                                          source_array.shape[1], source_array.shape[0]),
+                    "camera": crop_camera(0, 0, 90, source_array.shape[1], source_array.shape[0]),
                     "role": "official_initial_native_front_texture"}]
     return {"schema": MULTIRES_SCHEMA, "erp": array, "patches": patches,
             "render_base": array,
@@ -112,17 +96,9 @@ def source_profile(source: Any, *, source_metadata: Any = None,
     """
     pixels = rgb_array(source)
     height, width = pixels.shape[:2]
-    metadata_ref = None
-    metadata = None
-    if source_metadata is not None:
-        if not isinstance(source_metadata, Mapping):
-            raise ValueError("source_metadata must be an explicit verified mapping")
-        metadata = dict(source_metadata)
-        if metadata.get("canvas") and metadata["canvas"] != [width, height]:
-            raise ValueError("source padding metadata canvas does not match source pixels")
-        if source_content_box is None and "padding_ltrb" in metadata:
-            left, top, right_pad, bottom_pad = map(int, metadata["padding_ltrb"])
-            source_content_box = [left, top, width - right_pad, height - bottom_pad]
+    if source_content_box is None and source_metadata is not None and "padding_ltrb" in source_metadata:
+        left, top, right_pad, bottom_pad = map(int, source_metadata["padding_ltrb"])
+        source_content_box = [left, top, width - right_pad, height - bottom_pad]
     if source_content_box is None:
         has_black_border = any(np.all(edge == 0) for edge in
                                (pixels[0], pixels[-1], pixels[:, 0], pixels[:, -1]))
@@ -141,8 +117,7 @@ def source_profile(source: Any, *, source_metadata: Any = None,
     profile = {"width": width, "height": height, "content_box": [left, top, right, bottom],
                "padding_ltrb": [left, top, width - right, height - bottom],
                "format": "fixed_screen_letterbox", "padding_is_world_texture": False,
-               "padding_metadata_ref": metadata_ref,
-               "preprocess_ref": metadata.get("preprocess") if metadata else None}
+               "padding_metadata_ref": None, "preprocess_ref": None}
     return profile
 
 
@@ -207,36 +182,6 @@ def _camera_grid(hfov: float, width: int, height: int):
     xs = ((np.arange(width) + .5) / width * 2 - 1) * tan_x
     ys = (1 - (np.arange(height) + .5) / height * 2) * tan_y
     return xs[None, :], ys[:, None]
-
-
-def rgb_array(image: Any) -> np.ndarray:
-    """Read RGB pixels without resizing. Paths, PIL, and uint8 arrays work."""
-    if isinstance(image, (str, Path)):
-        with Image.open(image) as source:
-            return np.asarray(source.convert("RGB")).copy()
-    if isinstance(image, Image.Image):
-        return np.asarray(image.convert("RGB")).copy()
-    array = np.asarray(image)
-    if array.ndim != 3 or array.shape[2] not in (3, 4) or array.dtype != np.uint8:
-        raise ValueError("image must contain uint8 RGB/RGBA pixels")
-    return np.ascontiguousarray(array[..., :3])
-
-
-def pixel_sha256(image: Any) -> str:
-    array = rgb_array(image)
-    header = f"RGB uint8 {array.shape[1]} {array.shape[0]}\n".encode("ascii")
-    digest = hashlib.sha256()
-    digest.update(header)
-    digest.update(memoryview(array).cast("B"))
-    return digest.hexdigest()
-
-
-def file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def crop_camera(yaw: float = 0, pitch: float = 0, hfov: float = 90,
@@ -316,31 +261,7 @@ def render_view(pano: Any, yaw: float = 0, pitch: float = 0, hfov: float = 90,
 def _support_alpha(support: Any, width: int, height: int) -> np.ndarray:
     if support is None:
         return np.ones((height, width), dtype=np.float32)
-    if isinstance(support, Mapping):
-        if "mask" in support:
-            support = support["mask"]
-        elif "bbox" in support:
-            bbox = np.asarray(support["bbox"], dtype=np.float64)
-            if bbox.shape != (4,) or not np.isfinite(bbox).all():
-                raise ValueError("support bbox must have four finite values")
-            if support.get("normalized", True):
-                bbox = bbox * np.asarray([width, height, width, height])
-            left, top, right, bottom = bbox.tolist()
-            if not 0 <= left < right <= width or not 0 <= top < bottom <= height:
-                raise ValueError("support bbox must be nonempty and inside the view")
-            xs = np.arange(width)[None, :] + .5
-            ys = np.arange(height)[:, None] + .5
-            return ((xs >= left) & (xs < right) &
-                    (ys >= top) & (ys < bottom)).astype(np.float32)
-        else:
-            raise ValueError("support mapping needs mask or bbox")
-    if isinstance(support, (str, Path)):
-        with Image.open(support) as image:
-            alpha = np.asarray(image.convert("L"), dtype=np.float32)
-    elif isinstance(support, Image.Image):
-        alpha = np.asarray(support.convert("L"), dtype=np.float32)
-    else:
-        alpha = np.asarray(support, dtype=np.float32)
+    alpha = np.asarray(support, dtype=np.float32)
     if alpha.ndim != 2 or not alpha.size or not np.isfinite(alpha).all():
         raise ValueError("support must be a finite nonempty 2D mask")
     if alpha.min() < 0 or alpha.max() > 255:
@@ -351,26 +272,20 @@ def _support_alpha(support: Any, width: int, height: int) -> np.ndarray:
 
 
 def _composite_content_edit(pano: Any, edited: Any, yaw: float = 0,
-                        pitch: float = 0, hfov: float = 90, support: Any = None,
-                        *, blend_feather_px: int = 0,
-                        return_metadata: bool = False):
+                        pitch: float = 0, hfov: float = 90, support: Any = None):
     """Reproject a scoped perspective edit and preserve every zero-alpha pixel.
 
-    Support may be an L image/path, 2D array, or ``{'bbox':[x0,y0,x1,y1],
-    'normalized':True}``. Bbox defaults to normalized edge coordinates.
-    An explicit mask may have a different resolution; its normalized frustum
-    remains the same. ``None`` selects the full edited perspective footprint.
-    Returns panorama array, or (array, ERP float alpha, JSON metadata) when
-    return_metadata=True. Pixels outside ERP alpha>0 stay exactly unchanged.
+    Support is a 2D mask in [0,1] or [0,255]; it may have a different
+    resolution, since its normalized frustum remains the same. ``None``
+    selects the full edited perspective footprint.
+    Returns (panorama, ERP float alpha, JSON metadata). Pixels outside ERP
+    alpha>0 stay exactly unchanged.
     """
     array, edit = erp_array(pano), rgb_array(edited)
     height, width = edit.shape[:2]
-    if int(blend_feather_px) != blend_feather_px or blend_feather_px < 0:
-        raise ValueError("blend_feather_px must be a nonnegative integer")
     alpha = _support_alpha(support, width, height)
     result, erp_alpha = projection.reproject_crop_to_erp(
-        array, edit, crop_camera(yaw, pitch, hfov, width, height),
-        blend_feather_px=int(blend_feather_px), crop_alpha=alpha)
+        array, edit, crop_camera(yaw, pitch, hfov, width, height), alpha)
     outside = erp_alpha == 0
     violations = int(np.count_nonzero(np.any(result[outside] != array[outside], axis=-1)))
     if violations:
@@ -393,38 +308,23 @@ def _composite_content_edit(pano: Any, edited: Any, yaw: float = 0,
         # The patch frustum and support are geometric. Older native textures
         # remain losslessly stored underneath this later accepted edit layer.
         # Each output ray applies the same ordered alpha composition.
-        native_alpha = alpha.copy()
-        if blend_feather_px > 0:
-            ah, aw = native_alpha.shape
-            xs, ys = np.meshgrid((np.arange(aw) + .5) * width / aw,
-                                 (np.arange(ah) + .5) * height / ah)
-            feather = np.clip(np.minimum.reduce([xs, width - xs, ys, height - ys]) /
-                              float(blend_feather_px), 0, 1)
-            native_alpha *= feather
-        patch = {"pixels": edit, "alpha": native_alpha.astype(np.float32),
+        patch = {"pixels": edit, "alpha": alpha.astype(np.float32),
                  "camera": crop_camera(yaw, pitch, hfov, width, height),
                  "role": "accepted_scoped_endpoint_edit_native_texture"}
         updated["patches"] = list(pano["patches"]) + [patch]
         metadata.update({"method": "multires_geometric_scoped_texture_overlay",
                          "native_prior_patches_unchanged": True,
                          "native_prior_patch_changed_pixels": 0,
-                         "native_edit_support_nonzero_pixels": int(np.count_nonzero(native_alpha)),
+                         "native_edit_support_nonzero_pixels": int(np.count_nonzero(alpha)),
                          "input_panorama_state_sha256": panorama_state_sha256(pano),
                          "output_panorama_state_sha256": panorama_state_sha256(updated)})
         result = updated
-    if return_metadata:
-        return result, erp_alpha, metadata
-    return result
+    return result, erp_alpha, metadata
 
 
 def composite_view_edit(pano: Any, edited: Any, yaw: float = 0,
-                        pitch: float = 0, hfov: float = 90, support: Any = None,
-                        *, blend_feather_px: int = 0,
-                        return_metadata: bool = False):
+                        pitch: float = 0, hfov: float = 90, support: Any = None):
     """Strip fixed screen padding before geometric scoped edit reprojection."""
-    if not is_panorama_state(pano):
-        return _composite_content_edit(pano, edited, yaw, pitch, hfov, support,
-                    blend_feather_px=blend_feather_px, return_metadata=return_metadata)
     image = rgb_array(edited)
     height, width = image.shape[:2]
     left, top, right, bottom = profile_content_box(pano["viewport_profile"], width, height)
@@ -434,48 +334,30 @@ def composite_view_edit(pano: Any, edited: Any, yaw: float = 0,
     content = np.ascontiguousarray(image[top:bottom, left:right])
     content_alpha = np.ascontiguousarray(alpha[top:bottom, left:right])
     result, erp_alpha, metadata = _composite_content_edit(
-        pano, content, yaw, pitch, hfov, content_alpha,
-        blend_feather_px=blend_feather_px, return_metadata=True)
+        pano, content, yaw, pitch, hfov, content_alpha)
     metadata.update({"viewport_profile": pano["viewport_profile"],
                      "edited_profile_size": [width, height],
                      "edited_content_box": [left, top, right, bottom],
                      "screen_padding_reprojected_as_world_texture": False})
-    return (result, erp_alpha, metadata) if return_metadata else result
+    return result, erp_alpha, metadata
 
 
 def lift_front(pano: Any, source: Any, *, width: int = 4096,
-               height: int = 2048, yaw: float = 0, pitch: float = 0,
-               hfov: float = 90, return_metadata: bool = False):
+               height: int = 2048, yaw: float = 0, pitch: float = 0, hfov: float = 90):
     """Resize supplied ERP and inverse-project source into its front frustum.
 
     ``pano`` must be actual panorama content from the bootstrap image model.
-    No missing panorama is synthesized. Source pixels remain separately
-    attributable; the ERP lifting adds only interpolation and is measured by
-    rendering the front view again. No source override occurs on rendering.
+    No missing panorama is synthesized. No source override occurs on rendering.
     """
     if int(width) != width or int(height) != height or width != 2 * height:
         raise ValueError("ERP dimensions must be positive integers with W=2H")
     if min(width, height) < 1:
         raise ValueError("ERP dimensions must be positive")
     pano_array, source_array = rgb_array(pano), rgb_array(source)
-    original_size = [pano_array.shape[1], pano_array.shape[0]]
-    if original_size != [width, height]:
+    if [pano_array.shape[1], pano_array.shape[0]] != [width, height]:
         pano_array = np.asarray(Image.fromarray(pano_array).resize(
             (int(width), int(height)), Image.Resampling.LANCZOS))
-    lifted, alpha, metadata = _composite_content_edit(
-        pano_array, source_array, yaw=yaw, pitch=pitch, hfov=hfov,
-        blend_feather_px=0, return_metadata=True)
-    front = render_view(lifted, yaw, pitch, hfov,
-                        source_array.shape[1], source_array.shape[0])
-    metadata.update({"method": "source_frustum_lift_into_actual_outpaint_erp",
-                     "bootstrap_input_size": original_size,
-                     "resize": "Lanczos" if original_size != [width, height] else "none",
-                     "source_pixel_sha256": pixel_sha256(source_array),
-                     "source_override_in_renderer": False,
-                     "front_roundtrip": image_error(source_array, front)})
-    if return_metadata:
-        return lifted, metadata
-    return lifted
+    return _composite_content_edit(pano_array, source_array, yaw=yaw, pitch=pitch, hfov=hfov)[0]
 
 
 def image_error(reference: Any, image: Any) -> dict[str, Any]:
@@ -492,53 +374,11 @@ def image_error(reference: Any, image: Any) -> dict[str, Any]:
             "pixel_identical": bool(not np.any(error))}
 
 
-def rotation_poses(start_yaw: float = 0, end_yaw: float = 45,
-                   start_pitch: float = 0, end_pitch: float = 0,
-                   *, num_frames: int = 124, shortest_yaw: bool = False,
-                   easing: str = "linear") -> list[dict[str, float]]:
-    """Return both endpoint poses. Linear motion matches constant camera speed."""
-    if int(num_frames) != num_frames or num_frames < 2:
-        raise ValueError("num_frames must be an integer >=2")
-    for yaw, pitch in ((start_yaw, start_pitch), (end_yaw, end_pitch)):
-        crop_camera(yaw, pitch)
-    delta = float(end_yaw) - float(start_yaw)
-    if shortest_yaw:
-        delta = (delta + 180) % 360 - 180
-    if easing not in ("linear", "smoothstep"):
-        raise ValueError("easing must be linear or smoothstep")
-    poses = []
-    for i in range(int(num_frames)):
-        progress = i / (num_frames - 1)
-        if easing == "smoothstep":
-            progress = progress * progress * (3 - 2 * progress)
-        poses.append({"yaw": float(start_yaw + progress * delta),
-                      "pitch": float(start_pitch + progress * (end_pitch - start_pitch))})
-    return poses
-
-
-def _run_path(path: str | Path, *, run_root: Path, must_exist: bool = True) -> Path:
-    """Resolve an in-memory path through the session's containment boundary."""
-    from ..session.io import resolve_run_path
-
-    supplied = Path(path)
-    if supplied.is_absolute():
-        try:
-            relative = supplied.relative_to(Path(run_root).absolute()).as_posix()
-        except ValueError:
-            raise ValueError("panorama asset path is outside run root") from None
-    else:
-        relative = supplied.as_posix()
-    return resolve_run_path(run_root, relative, must_exist=must_exist)
-
-
 def _persist_asset(state: dict[str, Any], directory: Path, kind: str,
                    value: np.ndarray, *, run_root: Path) -> dict[str, Any]:
-    from ..session.io import file_ref, verify_ref, write_bytes_once
-    from ..image_io import encode_rgb_png
-
     image_asset = kind == "rgb"
     array = rgb_array(value) if image_asset else np.asarray(value, dtype=np.float32)
-    digest = pixel_sha256(array) if image_asset else _array_sha256(array)
+    digest = pixel_sha256(array) if image_asset else array_sha256(array)
     asset_key = f"{kind}:{digest}"
     cache = state.setdefault("_asset_refs", {})
     cached = cache.get(asset_key)
@@ -546,7 +386,7 @@ def _persist_asset(state: dict[str, Any], directory: Path, kind: str,
         # Reuse only verified assets in this run, never an adjacent cache.
         _read_asset(cached, kind, run_root=run_root)
         return dict(cached)
-    path = _run_path(directory / (digest + (".png" if image_asset else ".npy")),
+    path = _local(directory / (digest + (".png" if image_asset else ".npy")),
                      run_root=run_root, must_exist=False)
     if path.exists():
         ref = file_ref(path, run_root=run_root, image=image_asset)
@@ -579,11 +419,9 @@ def save_panorama_state(state: dict[str, Any], directory: Path, *, run_root: Pat
     The preview, immutable render base, every ordered patch and float32 alpha
     retain separate encoded and decoded hashes. Unchanged assets are reused.
     """
-    from ..session.io import write_once
-
     if not is_panorama_state(state):
         raise ValueError("save_panorama_state requires a multires panorama state")
-    target = _run_path(directory, run_root=run_root, must_exist=False)
+    target = _local(directory, run_root=run_root, must_exist=False)
     pool = target / "panorama_assets"
     record = {"schema": MULTIRES_SCHEMA, "renderer": state["renderer"],
               "viewport_profile": state["viewport_profile"],
@@ -605,8 +443,6 @@ def save_panorama_state(state: dict[str, Any], directory: Path, *, run_root: Pat
 
 
 def _read_asset(ref: Mapping[str, Any], kind: str, *, run_root: Path) -> np.ndarray:
-    from ..session.io import verify_ref
-
     path = verify_ref(ref, run_root=run_root)
     if kind == "rgb":
         array = rgb_array(path)
@@ -617,7 +453,7 @@ def _read_asset(ref: Mapping[str, Any], kind: str, *, run_root: Path) -> np.ndar
             raise ValueError("stored panorama alpha must be finite nonempty float32 HxW")
         if np.any(array < 0) or np.any(array > 1):
             raise ValueError("stored panorama alpha is outside [0,1]")
-        digest, expected = _array_sha256(array), ref["array_sha256"]
+        digest, expected = array_sha256(array), ref["array_sha256"]
     if digest != expected or (ref.get("shape") is not None and list(array.shape) != ref["shape"]):
         raise ValueError("stored panorama asset pixel/array hash or shape changed")
     return array
@@ -625,12 +461,10 @@ def _read_asset(ref: Mapping[str, Any], kind: str, *, run_root: Path) -> np.ndar
 
 def load_panorama_state(path: Path | Mapping[str, Any], *, run_root: Path) -> dict[str, Any]:
     """Restore the exact geometric state after validating every referenced asset."""
-    from ..session.io import read_json, resolve_run_path
-
     ref = path if isinstance(path, Mapping) else {"path": path}
     resolved = (resolve_run_path(run_root, ref["path"]) if isinstance(path, Mapping)
-                else _run_path(ref["path"], run_root=run_root))
-    if ref.get("sha256") and file_sha256(resolved) != ref["sha256"]:
+                else _local(ref["path"], run_root=run_root))
+    if ref.get("sha256") and sha256_file(resolved) != ref["sha256"]:
         raise ValueError("panorama state manifest byte hash changed")
     # Read by path to avoid verify_ref's canonical-state recursion.
     record = read_json(resolved, run_root=run_root)
@@ -645,7 +479,7 @@ def load_panorama_state(path: Path | Mapping[str, Any], *, run_root: Path) -> di
         pixels = _read_asset(entry["pixels"], "rgb", run_root=run_root)
         alpha = _read_asset(entry["alpha"], "alpha", run_root=run_root)
         cache[f"rgb:{pixel_sha256(pixels)}"] = entry["pixels"]
-        cache[f"alpha:{_array_sha256(alpha)}"] = entry["alpha"]
+        cache[f"alpha:{array_sha256(alpha)}"] = entry["alpha"]
         patches.append({"pixels": pixels, "alpha": alpha,
                         "camera": entry["camera"], "role": entry["role"]})
     state = {"schema": MULTIRES_SCHEMA, "renderer": record["renderer"],
@@ -659,105 +493,13 @@ def load_panorama_state(path: Path | Mapping[str, Any], *, run_root: Path) -> di
     return state
 
 
-def restore_official_context(generated: Any, canvas: Any, mask: Any):
-    """Restore every protected native source texel before constructing state."""
-    pixels = rgb_array(generated).copy()
-    known = np.asarray(mask) == 0
-    reference = rgb_array(canvas)
-    if pixels.shape != reference.shape or known.shape != pixels.shape[:2]:
-        raise ValueError('context outpaint shape differs from its fixed native canvas')
-    protected_error = image_error(reference[known][None,...], pixels[known][None,...])
-    pixels[known] = reference[known]
-    return pixels, {'protected_region_returned_error':protected_error,
-                    'protected_region_restored_changed_pixels':0,
-                    'protected_region_pixel_count':int(known.sum()),
-                    'source_exact_after_restoration':bool(np.array_equal(pixels[known],reference[known]))}
-
-
 def erp_outpaint_input(context: Any, *, hfov: float, width: int = 2048,
                        height: int = 1024):
     """Embed accepted wide native context before generating unknown directions."""
     canvas = np.full((height,width,3),127,dtype=np.uint8)
-    canvas, alpha, meta = _composite_content_edit(
-        canvas,context,hfov=hfov,support=None,blend_feather_px=0,return_metadata=True)
+    canvas, alpha, meta = _composite_content_edit(canvas, context, hfov=hfov)
     mask = (alpha == 0).astype(np.uint8) * 255
     meta.update({'known_region':'wide perspective context including exact official front',
                  'mask_rule':'255 editable; 0 preserved',
                  'unknown_fraction':float(np.mean(mask > 0))})
     return canvas,mask,meta
-
-
-def create_seam_panorama_state(pano: Any, context: Any, source: Any, *,
-                               context_hfov: float, width: int = 4096,
-                               height: int = 2048, source_metadata: Any = None,
-                               outer_feather_px: int = 48):
-    """Keep the complete official front exact and blend at an outer context edge."""
-    native = rgb_array(context)
-    base=rgb_array(pano)
-    if base.shape[:2] != (height,width):
-        base=np.asarray(Image.fromarray(base).resize((width,height),Image.Resampling.LANCZOS))
-    state = create_panorama_state(base,source,width=width,height=height,
-                                  source_metadata=source_metadata)
-    h,w = native.shape[:2]
-    xs,ys = np.meshgrid(np.arange(w,dtype=np.float32)+.5,
-                        np.arange(h,dtype=np.float32)+.5)
-    edge = np.minimum.reduce([xs,w-xs,ys,h-ys])
-    alpha = np.clip(edge / max(1,outer_feather_px),0,1).astype(np.float32)
-    state['patches'] = [{'pixels':native,'alpha':alpha,
-                         'camera':crop_camera(0,0,context_hfov,w,h),
-                         'role':'ae_masked_native_outpaint_context'}] + state['patches']
-    # Do not hard-lift context into the immutable render base: doing so would
-    # preserve its rectangular seam even after the native alpha fades out.
-    # The layer below renders each patch exactly once over actual ERP content.
-    state['render_base'] = base
-    # Neither immutable base nor previous patches are changed by endpoint edits.
-    return state
-
-
-def official_boundary_metrics(state: Any, *, yaw: float, pitch: float = 0,
-                               width: int = 1344, height: int = 768):
-    """Measure exactly the same geometric official-frustum boundary each time.
-
-    RGB L1 gradients across the patch boundary are compared with adjacent
-    parallel pixel pairs 8 and 24 pixels away. Natural image edges may overlap
-    the boundary. These are diagnostics; none grants visual acceptance.
-    """
-    image = render_view(state,yaw=yaw,pitch=pitch,width=width,height=height)
-    l,t,r,b = profile_content_box(state['viewport_profile'],width,height)
-    cw,ch = r-l,b-t
-    cam = crop_camera(yaw,pitch,90,cw,ch)
-    x,y = _camera_grid(90.0,cw,ch)
-    geom = projection
-    wx,wy,wz = geom._camera_to_world_components(x,y,np.ones((ch,cw)),
-                                               cam['center_lon'],cam['center_lat'])
-    directions = np.stack(np.broadcast_arrays(wx,wy,wz),axis=-1)
-    official = next(p for p in state['patches'] if p['role']=='official_initial_native_front_texture')
-    _,_,a = _project_patch(directions,official)
-    known = a >= .999999
-    content = image[t:b,l:r].astype(np.float32)
-    crossing,control = [],[]
-    edges = {}
-    for axis in (0,1):
-        pairmask = np.diff(known.astype(np.int8),axis=axis) != 0
-        gradients = np.abs(np.diff(content,axis=axis)).mean(axis=-1)
-        ij = np.argwhere(pairmask)
-        values = gradients[pairmask]
-        crossing.extend(values.tolist())
-        controls=[]
-        for distance in (8,24):
-            for sign in (-1,1):
-                q=ij.copy();q[:,axis]+=sign*distance
-                valid=(q[:,0]>=0)&(q[:,0]<gradients.shape[0])&(q[:,1]>=0)&(q[:,1]<gradients.shape[1])
-                if np.any(valid):controls.extend(gradients[q[valid,0],q[valid,1]].tolist())
-        control.extend(controls)
-        edges['vertical_boundary' if axis==1 else 'horizontal_boundary'] = {
-            'pixel_pairs':int(values.size),'cross_boundary_rgb_l1_mean':float(values.mean()) if values.size else None,
-            'cross_boundary_rgb_l1_p95':float(np.percentile(values,95)) if values.size else None,
-            'nearby_natural_gradient_mean':float(np.mean(controls)) if controls else None}
-    cross = np.asarray(crossing);natural=np.asarray(control)
-    return {'yaw':float(yaw),'pitch':float(pitch),'same_boundary_definition':'official_native_camera_frustum',
-            'pixel_pairs':int(cross.size),'cross_boundary_rgb_l1_mean':float(cross.mean()) if cross.size else None,
-            'cross_boundary_rgb_l1_p95':float(np.percentile(cross,95)) if cross.size else None,
-            'nearby_natural_gradient_mean':float(natural.mean()) if natural.size else None,
-            'boundary_to_nearby_ratio':float(cross.mean()/max(.001,natural.mean())) if cross.size and natural.size else None,
-            'edges':edges,'visual_acceptance_from_metric':False}

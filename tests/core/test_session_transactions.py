@@ -1,8 +1,6 @@
-"""Real session/transaction execution with explicit test-only procedural providers.
+"""Real session transactions with explicit test-only procedural providers (not models).
 
-These providers are not models. Only bootstrap generation is patched; routing,
-planning, support, geometry, verification, presentation, observation, memory and
-the pending transaction path execute the production package code.
+Only bootstrap generation is patched; every later stage runs the production code.
 """
 from __future__ import annotations
 
@@ -22,15 +20,11 @@ from wmmllm.budget import BudgetController
 from wmmllm.config import AppConfig, ChatConfig, ImageConfig, VideoConfig
 from wmmllm.providers.errors import TransportExhausted
 from wmmllm.providers.factory import Providers
-from wmmllm.providers.types import (AttemptReceipt, CallReceipt, ChatResponse,
-                                    ImageEditResult)
+from wmmllm.providers.types import AttemptReceipt, CallReceipt, ChatResponse, ImageEditResult
 from wmmllm.providers.video import NoneVideoBackend
-from wmmllm.session.io import (IntegrityError, canonical_json, file_ref, read_json,
-                              save_png, sha256_file, write_atomic)
+from wmmllm.session.io import IntegrityError, canonical_json, read_json, save_png, sha256_file, write_atomic
 from wmmllm.session.runner import SessionRunner
-from wmmllm.state.panorama import (create_panorama_state, load_panorama_state,
-                                   panorama_state_sha256, render_view,
-                                   save_panorama_state)
+from wmmllm.state.panorama import create_panorama_state, render_view, save_panorama_state
 
 SEMANTIC_FIELDS = ('state_matches_source', 'action_preserves_request',
                    'endpoint_matches_action', 'scene_identity_preserved')
@@ -50,12 +44,8 @@ class TestOnlyQueuedChat:
     route = 'test-only-procedural-not-a-model'
 
     def __init__(self):
-        self.routes = deque()
-        self.verdicts = deque()
-        self.observer_errors = deque()
-        self.requests = []
-        self.active = None
-        self.caption = ''
+        self.routes, self.verdicts, self.observer_errors = deque(), deque(), deque()
+        self.requests, self.active, self.caption = [], None, ''
 
     def counts(self):
         return Counter(request.response_format['json_schema']['name'] for request in self.requests)
@@ -109,7 +99,7 @@ class TestOnlyQueuedChat:
                 'frame_indices': [0, 1]}]}
         else:
             raise AssertionError('Unexpected test schema: ' + name)
-        return ChatResponse(json.dumps(value), 'stop', 'test-procedural-not-a-model',
+        return ChatResponse(json.dumps(value), 'test-procedural-not-a-model',
                             _receipt('chat', request.role, value))
 
     def close(self):
@@ -132,15 +122,13 @@ class TestOnlyDrawnImage:
             pixels[:, image.width // 3:image.width // 2, 1] = 190
             image = Image.fromarray(pixels)
         else:
-            draw = ImageDraw.Draw(image)
             w, h = image.size
-            draw.rectangle((int(w * .42), int(h * .4), int(w * .58), int(h * .6)), fill=(245, 205, 40))
-        output = Path(request.output_dir)
-        output.mkdir(parents=True, exist_ok=True)
-        path = output / 'endpoint.png'
+            ImageDraw.Draw(image).rectangle((int(w * .42), int(h * .4), int(w * .58), int(h * .6)), fill=(245, 205, 40))
+        Path(request.output_dir).mkdir(parents=True, exist_ok=True)
+        path = Path(request.output_dir) / 'endpoint.png'
         with path.open('xb') as stream:
             image.save(stream, format='PNG')
-        return ImageEditResult(path, image.size, 'high', 'none',
+        return ImageEditResult(path,
             _receipt('image', 'editor', {'pixel_bytes_sha256': hashlib.sha256(np.asarray(image).tobytes()).hexdigest()}))
 
     def close(self):
@@ -149,10 +137,8 @@ class TestOnlyDrawnImage:
 
 class TestOnlyNoneVideo(NoneVideoBackend):
     __test__ = False
-
     def __init__(self):
         self.requests = []
-
     def present(self, transition):
         self.requests.append(transition)
         return super().present(transition)
@@ -199,8 +185,8 @@ def make_session(tmp_path, monkeypatch):
         seed = tmp_path / ('seed' + str(len(made)) + '.png')
         Image.fromarray(_procedural_pixels(1344, 768)).save(seed)
         size = (1344, 768) if canonical else (320, 180)
-        config = AppConfig(ChatConfig('test-only', 'test-not-a-model'),
-            ImageConfig('test-only', 'test-not-a-model'), video=VideoConfig(size=size, num_frames=3, fps=3.))
+        config = AppConfig(ChatConfig('test-only', 'test-not-a-model', base_url='http://offline.invalid/v1'),
+            ImageConfig('test-only', 'test-not-a-model', base_url='http://offline.invalid/v1'), video=VideoConfig(size=size, num_frames=3, fps=3.))
         chat, image, video = TestOnlyQueuedChat(), TestOnlyDrawnImage(), TestOnlyNoneVideo()
         providers = Providers(chat, image, video)
         budget = BudgetController(config.budget,
@@ -230,7 +216,7 @@ def _step(fixture, operation, caption, *, yaw=None, restore_node='', physical_st
 
 
 def _calls(fixture):
-    return (dict(fixture.chat.counts()), len(fixture.image.requests), len(fixture.video.requests))
+    return dict(fixture.chat.counts()), len(fixture.image.requests), len(fixture.video.requests)
 
 
 def test_session_camera_return_is_same_revision_pixel_and_byte_exact(make_session):
@@ -241,11 +227,9 @@ def test_session_camera_return_is_same_revision_pixel_and_byte_exact(make_sessio
     assert returned['status'] == 'accepted'
     node = f.runner.current_node
     assert node['physical_revision'] == initial['physical_revision'] == 0
-    assert node['origin_id'] == initial['origin_id']
-    assert node['view'] == initial['view']
+    assert node['origin_id'] == initial['origin_id']; assert node['view'] == initial['view']
     assert node['panorama_state'] == initial['panorama_state']
-    assert f.runner.store.snapshot().completed_segments == 2
-    assert len(f.image.requests) == 0
+    assert f.runner.store.snapshot().completed_segments == 2; assert len(f.image.requests) == 0
     receipts = [json.loads(path.read_text()) for path in (f.root / 'receipts').glob('*.json')]
     assert len(receipts) == len(f.chat.requests)
     assert all('returned_model' in receipt and 'requested_model' in receipt for receipt in receipts)
@@ -262,13 +246,11 @@ def test_local_edit_revision_then_turnback_uses_new_pixels_and_rejects_stale_tar
     assert edited['view']['pixel_sha256'] != initial['view']['pixel_sha256']
     _step(f, 'rotate', 'Look right after painting.', yaw=45)
     _step(f, 'revisit', 'Look back toward the edited tile.', yaw=0)
-    assert f.runner.current_node['physical_revision'] == 1
-    assert f.runner.current_node['view'] == edited['view']
+    assert f.runner.current_node['physical_revision'] == 1; assert f.runner.current_node['view'] == edited['view']
     before = deepcopy(f.runner.session_record())
     with pytest.raises(IntegrityError, match='stale physical revision'):
         _step(f, 'revisit', 'Restore the stale pre-edit view.', yaw=0, restore_node=initial['node_id'])
-    assert f.runner.session_record() == before
-    assert f.runner.store.snapshot().completed_segments == 3
+    assert f.runner.session_record() == before; assert f.runner.store.snapshot().completed_segments == 3
     assert len(f.image.requests) == 1
 
 
@@ -283,13 +265,11 @@ def test_navigation_new_origin_then_exact_current_revision_return(make_session):
     assert destination['panorama_state'] != initial['panorama_state']
     returned = _step(f, 'revisit', 'Return to the exact saved initial location.', yaw=0,
                      restore_node=initial['node_id'])
-    assert returned['status'] == 'accepted'
-    assert f.runner.current_node['origin_id'] == initial['origin_id']
+    assert returned['status'] == 'accepted'; assert f.runner.current_node['origin_id'] == initial['origin_id']
     assert f.runner.current_node['view'] == initial['view']
     assert f.runner.current_node['panorama_state'] == initial['panorama_state']
     assert f.runner.current_node['physical_revision'] == 0
-    assert f.runner.store.snapshot().completed_segments == 2
-    assert len(f.image.requests) == 1
+    assert f.runner.store.snapshot().completed_segments == 2; assert len(f.image.requests) == 1
     verifier = [r for r in f.chat.requests if r.response_format['json_schema']['name'] == 'endpoint_semantic_verification'][-1]
     assert verifier.images[0].sha256 == destination['view']['sha256']
 
@@ -301,17 +281,13 @@ def test_generated_semantic_retry_is_exactly_two_proposals(make_session, verdict
     result = _step(f, 'local_edit', 'Paint a yellow marker on the middle tile.')
     counts = f.chat.counts()
     assert result['status'] == status and result['semantic']['attempt_count'] == 2
-    assert len(f.image.requests) == 2
-    assert counts['aiwm_operation_plan'] == 1
-    assert counts['actual_generated_edit_support'] == 2
-    assert counts['endpoint_semantic_verification'] == 2
+    assert len(f.image.requests) == 2; assert counts['aiwm_operation_plan'] == 1
+    assert counts['actual_generated_edit_support'] == 2; assert counts['endpoint_semantic_verification'] == 2
     assert counts['source_grounded_transition_action'] + counts['visible_state_remaining_action'] == 2
     assert f.runner.store.snapshot().completed_segments == 1
     if status == 'held':
-        assert f.runner.current_node == f.initial
-        assert len(f.runner.session_record()['nodes']) == 1
-        assert counts['accepted_state_memory_observation'] == 0
-        assert not f.runner.store.snapshot().subjects
+        assert f.runner.current_node == f.initial; assert len(f.runner.session_record()['nodes']) == 1
+        assert counts['accepted_state_memory_observation'] == 0; assert not f.runner.store.snapshot().subjects
         assert result['to_node_id'] == result['from_node_id']
     else:
         assert f.runner.current_node['physical_revision'] == 1
@@ -323,10 +299,8 @@ def test_geometric_semantic_failure_holds_without_image_regeneration(make_sessio
     f.chat.verdicts.append('fail')
     result = _step(f, 'rotate', 'Look right.', yaw=45)
     assert result['status'] == 'held' and result['semantic']['attempt_count'] == 1
-    assert f.runner.current_node == f.initial
-    assert f.chat.counts()['endpoint_semantic_verification'] == 1
-    assert f.chat.counts()['accepted_state_memory_observation'] == 0
-    assert not f.image.requests
+    assert f.runner.current_node == f.initial; assert f.chat.counts()['endpoint_semantic_verification'] == 1
+    assert f.chat.counts()['accepted_state_memory_observation'] == 0; assert not f.image.requests
 
 
 def test_observer_transport_error_keeps_accepted_ready_and_resumes_observation_only(make_session):
@@ -335,12 +309,10 @@ def test_observer_transport_error_keeps_accepted_ready_and_resumes_observation_o
     f.chat.routes.append({'operation': 'rotate', 'yaw': 45})
     with pytest.raises(EndpointRejected, match='Geometric observer failed'):
         f.runner.step('Look right.')
-    assert f.runner.current_node == f.initial
-    assert f.runner.store.snapshot().completed_segments == 0
+    assert f.runner.current_node == f.initial; assert f.runner.store.snapshot().completed_segments == 0
     assert f.runner.session_record()['transitions'] == []
     ready = f.root / 'transitions/turn0001/ACCEPTED_READY.json'
-    assert ready.is_file()
-    assert not (f.root / 'transitions/turn0001/FAILURE_HOLD.json').exists()
+    assert ready.is_file(); assert not (f.root / 'transitions/turn0001/FAILURE_HOLD.json').exists()
     assert not (f.root / 'pending/turn0001.json').exists()
     before = _calls(f)
     result = f.runner.step('Look right.')
@@ -348,15 +320,14 @@ def test_observer_transport_error_keeps_accepted_ready_and_resumes_observation_o
     after = _calls(f)
     expected = Counter(before[0])
     expected['accepted_state_memory_observation'] += 1
-    assert Counter(after[0]) == expected
-    assert after[1:] == before[1:]
+    assert Counter(after[0]) == expected; assert after[1:] == before[1:]
     assert f.runner.store.snapshot().completed_segments == 1
     resumed = read_json(f.root / 'transitions/turn0001/observation/transport_resume_001/OBSERVATION.json', run_root=f.root)
     assert resumed['status'] == 'OBSERVED'
 
 
 class SimulatedPublicationCrash(RuntimeError):
-    pass
+    """Injected crash between durable steps."""
 
 
 def test_pending_after_memory_commit_recovers_once_with_zero_new_calls(make_session, monkeypatch):
@@ -376,17 +347,13 @@ def test_pending_after_memory_commit_recovers_once_with_zero_new_calls(make_sess
     before = _calls(f)
     recovered = SessionRunner(f.root, deps=f.deps)
     record = recovered.resume()
-    assert _calls(f) == before
-    assert len(record['transitions']) == 1 and len(record['nodes']) == 2
-    assert recovered.store.snapshot().completed_segments == 1
-    assert not pending.exists()
+    assert _calls(f) == before; assert len(record['transitions']) == 1 and len(record['nodes']) == 2
+    assert recovered.store.snapshot().completed_segments == 1; assert not pending.exists()
     # A duplicate durable packet after publication is an idempotent cleanup.
     pending.write_bytes(packet_bytes)
     record2 = recovered.resume()
-    assert record2 == record
-    assert _calls(f) == before
-    assert recovered.store.snapshot().completed_segments == 1
-    assert not pending.exists()
+    assert record2 == record; assert _calls(f) == before
+    assert recovered.store.snapshot().completed_segments == 1; assert not pending.exists()
 
 
 @pytest.mark.parametrize('field', ['memory_endpoint', 'node_endpoint'])
@@ -412,6 +379,5 @@ def test_pending_rejects_valid_but_crossbound_endpoint_before_memory_commit(make
     recovered = SessionRunner(f.root, deps=f.deps)
     with pytest.raises(IntegrityError):
         recovered.resume()
-    assert _calls(f) == before
-    assert recovered.store.snapshot().completed_segments == 0
+    assert _calls(f) == before; assert recovered.store.snapshot().completed_segments == 0
     assert sha256_file(f.root / 'memory/MEMORY.json') == memory_hash

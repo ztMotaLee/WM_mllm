@@ -16,7 +16,7 @@ def run(directory):
     started=time.monotonic();root=Path(directory).resolve();root.mkdir(parents=True,exist_ok=True)
     print('OFFLINE PROCEDURAL FIXTURE: deterministic drawn providers, not a model.',flush=True)
     seed=generate(root/'procedural_seed.png')
-    config=AppConfig(ChatConfig('offline-demo','offline-not-a-model'),ImageConfig('offline-demo','offline-not-a-model'),video=VideoConfig(num_frames=3,fps=3.))
+    config=AppConfig(ChatConfig('offline-demo','offline-not-a-model',base_url='http://offline.invalid/v1'),ImageConfig('offline-demo','offline-not-a-model',base_url='http://offline.invalid/v1'),video=VideoConfig(num_frames=3,fps=3.))
     providers=Providers(OfflineProceduralChat(),OfflineDrawnImageEdit(),NoneVideoBackend())
     budget=BudgetController(config.budget,checkpoint=lambda value: __import__('wmmllm.session.io',fromlist=['write_atomic']).write_atomic(root/'budget/checkpoint.json',value,run_root=root))
     runner=SessionRunner(root,deps=EngineDeps(config,providers,budget,root,None))

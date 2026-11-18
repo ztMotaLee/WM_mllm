@@ -1,9 +1,6 @@
 WM^MLLM
 Copyright 2026 The WM^MLLM Authors
 
-This product includes MBench evaluator code, Copyright (c) 2026 MBench Contributors,
-and source headers Copyright 2026 MBench community. Distributed under the MIT License.
-This product includes CompBench evaluator code, Copyright (c) 2026 comp-bench.
-Distributed under the MIT License. The evaluator has portable path defaults.
-Complete third-party notices and license texts are in THIRD_PARTY_NOTICES.md
-and the corresponding eval/*/LICENSE.upstream files.
+The evaluation adapters load MBench (MIT, study-overflow/MBench@c44dbd9) and CompBench
+(MIT, comp-bench/CompBench@cb9165b) from checkouts the user obtains; no third-party
+source is included in this distribution.

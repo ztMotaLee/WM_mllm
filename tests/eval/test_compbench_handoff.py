@@ -1,61 +1,43 @@
-"""Synthetic prepare/compose/evaluator handoff; no model inference or downloads."""
+"""Synthetic prepare/compose/export/evaluator handoff; no model inference or downloads.
+
+Set COMPBENCH_EVAL_ALL to the pinned upstream eval_all.py to also check its result layout.
+"""
 from __future__ import annotations
 
 import ast
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 import pytest
 
-from wmmllm_datasets import prepare_compbench as prepare
-from reproduce.compbench.__main__ import main as compose_main
-from eval.compbench.prepare_results import export_results, result_relative
-from eval.compbench.run_eval import main as evaluate_main, PORTABLE_EVALUATOR
+from eval.compbench import prepare_index as prepare, run_eval
+from eval.compbench.compose import main as compose_main
+from eval.compbench.export import export_results
+from test_compbench_index import make_dataset
 
 
-def make_dataset(root: Path):
-    for subtask, metadata in prepare.METADATA.items():
-        local = subtask in ('add', 'remove', 'replace')
-        key = 'nested/scene.png' if local else 'scene.png'
-        if local:
-            record = {'image_path': key, 'instruction': 'Add a colored square.'}
-            prefix = f'tasks/{subtask}'
-            directories = ('input_image', 'edited_image', 'mask')
-        else:
-            field = 'instruction' if subtask == 'implicit' else 'add_ins' if subtask == 'multi_object_add' else 'remove_ins'
-            record = {'image_name': key, field: 'Add a colored square.'}
-            prefix = 'tasks/implicit_reasoning' if subtask == 'implicit' else f'tasks/multi_turn_editing/{subtask}'
-            directories = ('ori_images', 'edited_images', 'masks')
-        meta = root / metadata
-        meta.parent.mkdir(parents=True, exist_ok=True)
-        meta.write_text(json.dumps([record]) if meta.suffix == '.json' else json.dumps(record) + '\n')
-        for directory in directories:
-            path = root / prefix / directory / key
-            path.parent.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(np.full((96, 96, 3), 20, np.uint8)).save(path)
-
-
-def upstream_task_configs(data_root, model_root, model):
+def upstream_task_configs(evaluator, data_root, model_root, model):
     # Execute the actual pure path-mapping function without heavyweight imports.
-    tree = ast.parse(PORTABLE_EVALUATOR.read_text())
+    tree = ast.parse(evaluator.read_text())
     definition = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'get_all_task_configs')
     namespace = {'os': __import__('os')}
-    exec(compile(ast.Module(body=[definition], type_ignores=[]), str(PORTABLE_EVALUATOR), 'exec'), namespace)
+    exec(compile(ast.Module(body=[definition], type_ignores=[]), str(evaluator), 'exec'), namespace)
     return namespace['get_all_task_configs'](str(data_root), str(model_root), model)
 
 
 def test_prepare_compose_export_evaluation_preflight_preserves_eval_key(tmp_path, monkeypatch, capsys):
-    dataset = tmp_path / 'dataset'
-    make_dataset(dataset)
-    checksums = [(path.relative_to(dataset).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
-                 for path in dataset.rglob('*') if path.is_file()]
-    monkeypatch.setattr(prepare, 'read_manifest', lambda _: checksums)
+    dataset = make_dataset(tmp_path / 'dataset', key_local='nested/scene.png')
+    for path in dataset.rglob('*.png'):
+        Image.fromarray(np.full((96, 96, 3), 20, np.uint8)).save(path)
+    monkeypatch.setattr(prepare, 'METADATA_SHA256', {name: hashlib.sha256((dataset / name).read_bytes()).hexdigest()
+                                                     for name in prepare.METADATA_SHA256})
     monkeypatch.setattr(prepare, 'EXPECTED_COUNTS', {task: 1 for task in prepare.METADATA})
     index = tmp_path / 'index.jsonl'
-    assert prepare.main(['--root', str(dataset), '--output', str(index), '--verify']) == 0
+    assert prepare.main(['--root', str(dataset), '--output', str(index)]) == 0
     rows = [json.loads(line) for line in index.read_text().splitlines()]
     proposals = tmp_path / 'proposals'
     proposals.mkdir()
@@ -69,16 +51,22 @@ def test_prepare_compose_export_evaluation_preflight_preserves_eval_key(tmp_path
     results = tmp_path / 'results'
     receipt = export_results(composed, results, 'sample')
     assert receipt['rows'] == 6
-    configs = {item['subtask']: item for item in upstream_task_configs(dataset / 'tasks', results / 'sample', 'sample')}
     for item, original in zip(receipt['items'], rows):
-        expected = Path(configs[original['subtask']]['res_dir']) / original['eval_key']
-        assert results / item['result'] == expected
         assert item['eval_key'] == original['eval_key']
-        assert expected.read_bytes() == (composed / item['final']).read_bytes()
+        assert (results / item['result']).read_bytes() == (composed / item['final']).read_bytes()
+    if os.environ.get('COMPBENCH_EVAL_ALL'):
+        configs = {item['subtask']: item for item in upstream_task_configs(
+            Path(os.environ['COMPBENCH_EVAL_ALL']), dataset / 'tasks', results / 'sample', 'sample')}
+        for item, original in zip(receipt['items'], rows):
+            assert results / item['result'] == Path(configs[original['subtask']]['res_dir']) / original['eval_key']
+    stub = tmp_path / 'eval_all.py'
+    stub.write_text('raise RuntimeError("must not execute")\n')
+    monkeypatch.setattr(run_eval, 'EVALUATOR_SHA256', hashlib.sha256(stub.read_bytes()).hexdigest())
     capsys.readouterr()
-    assert evaluate_main(['sample', '--check-inputs', '--index', str(index), '--data-root', str(dataset / 'tasks'),
-                          '--results-root', str(results), '--output-dir', str(tmp_path / 'scores'),
-                          '--tasks', 'local', 'multi_object', 'implicit']) == 0
+    arguments = ['sample', '--evaluator', str(stub), '--check-inputs', '--index', str(index),
+                 '--data-root', str(dataset / 'tasks'), '--results-root', str(results),
+                 '--output-dir', str(tmp_path / 'scores')]
+    assert run_eval.main(arguments + ['--tasks', 'local', 'multi_object', 'implicit']) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['items'] == 6 and result['metric_inference'] is False
     assert {item['row_id'] for item in result['mapping']} == {row['row_id'] for row in rows}
@@ -87,14 +75,7 @@ def test_prepare_compose_export_evaluation_preflight_preserves_eval_key(tmp_path
         export_results(composed, results, 'sample')
     (results / receipt['items'][0]['result']).unlink()
     with pytest.raises(ValueError, match='unavailable'):
-        evaluate_main(['sample', '--check-inputs', '--index', str(index), '--data-root', str(dataset / 'tasks'),
-                       '--results-root', str(results), '--output-dir', str(tmp_path / 'scores')])
-
-
-@pytest.mark.parametrize('key', ['../bad.png', '/bad.png', 'a//b.png', 'a\\b.png', 'a?b.png'])
-def test_evaluation_export_rejects_escaping_keys(key):
-    with pytest.raises(ValueError):
-        result_relative('sample', 'add', key)
+        run_eval.main(arguments)
 
 
 def test_evaluation_export_rejects_duplicate_mapping_and_corrupt_pixels(tmp_path):

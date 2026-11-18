@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
-import fcntl
 import json
 import math
 import os
@@ -13,8 +12,9 @@ import tempfile
 import time
 import traceback
 
-from .common import (PACKAGE, FAMILIES, atomic, clean, digest, file_ref, now,
-                     read_manifest, record_id, select_rows, verify_code)
+from .common import PACKAGE, atomic, digest, file_ref, now, read_manifest, record_id, verify_code
+
+FAMILY = "environment"
 
 
 def _measured(item):
@@ -24,9 +24,9 @@ def _measured(item):
 
 
 def _invalid_payload(metric, item, error):
-    from eval.mbench._upstream.core.result import UnitResult
-    from eval.mbench._upstream.core.pipeline import _project_unit_scores, _project_item_scores
-    from eval.mbench._upstream.aggregators.mean import MeanAggregator
+    from mbench.core.result import UnitResult
+    from mbench.core.pipeline import _project_unit_scores, _project_item_scores
+    from mbench.aggregators.mean import MeanAggregator
     unit = UnitResult(item.item_id, metric.name, metric.unit_type,
                       item.item_id + "__scorer_failure", valid=False, error=error)
     result = metric.aggregate_item(item, [unit])
@@ -38,58 +38,23 @@ def _invalid_payload(metric, item, error):
             "item": asdict(projected), "summary": asdict(summary), "raw_item_scores": {}}
 
 
-def _aggregate(records, output):
-    from eval.mbench._upstream.aggregators.mean import MeanAggregator
-    from eval.mbench._upstream.core.result import UnitResult, ItemResult, ResultWriter
-    writer = ResultWriter(output)
-    writer.write_items([{"item_id": row["item_id"], "model_id": row["model_id"]} for row in records])
-    summary = {}
-    for name in sorted({metric for row in records for metric in row["metrics"]}):
-        units, items = [], []
-        for row in records:
-            payload = row["metrics"].get(name)
-            if payload is not None:
-                units.extend(UnitResult(**unit) for unit in payload["units"])
-                items.append(ItemResult(**payload["item"]))
-        metric_summary = MeanAggregator().aggregate(name, items)
-        writer.write_metric_results(name, units, items, metric_summary)
-        summary[name] = asdict(metric_summary)
-    atomic(output / "SUMMARY.json", summary)
-    return summary
-
-
 def _run(args):
     if args.device != "cpu" and not args.device.startswith("cuda:"):
         raise ValueError("device must be cpu or cuda:N")
     code = verify_code()
-    rows = select_rows(read_manifest(args.manifest), family=args.family, model=args.model,
-                       index=args.index, limit=args.limit,
-                       shard_index=args.shard_index, shard_count=args.shard_count)
+    rows = [row for row in read_manifest(args.manifest) if row["subset"] == FAMILY]
     if not rows:
         raise ValueError("No manifest videos match this partition")
     output = Path(args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
     records_dir = output / "records"
-    records_dir.mkdir(exist_ok=True)
-    # Each concurrently running partition must have its own output directory.
-    with (output / ".run.lock").open("a") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("Another scorer is using output directory " + str(output)) from exc
-        return _run_locked(args, rows, output, records_dir, code)
-
-
-def _run_locked(args, rows, output, records_dir, code):
+    records_dir.mkdir(parents=True, exist_ok=True)
     from .runtime import verify_weights, configure_offline, Runtime, video_metadata, environment_versions
     started = time.monotonic()
     run_id = digest({"created": now(), "pid": os.getpid(), "device": args.device,
-                     "family": args.family, "rows": [(r["model_id"], r["item_id"]) for r in rows]})
-    preflight_started = time.monotonic()
-    lock, weight_provenance = verify_weights(args.weights_dir, family=args.family)
+                     "family": FAMILY, "rows": [(r["model_id"], r["item_id"]) for r in rows]})
+    lock, weight_provenance = verify_weights(args.weights_dir, family=FAMILY)
     work_parent = Path(args.work_dir).resolve()
     work_parent.mkdir(parents=True, exist_ok=True)
-    records = []
     with tempfile.TemporaryDirectory(prefix="mem6_" + run_id[:12] + "_", dir=work_parent) as work:
         work_dir = Path(work)
         bindings = configure_offline(lock, work_dir)
@@ -98,7 +63,7 @@ def _run_locked(args, rows, output, records_dir, code):
             if not torch.cuda.is_available():
                 raise RuntimeError("Requested CUDA device is unavailable")
             torch.cuda.set_device(args.device)
-        runtime = Runtime(args.family, args.device, work_dir, lock)
+        runtime = Runtime(FAMILY, args.device, work_dir, lock)
         runtime.synchronize()
         startup_seconds = time.monotonic() - started
         provenance = {"code": code, "weights": weight_provenance,
@@ -109,8 +74,7 @@ def _run_locked(args, rows, output, records_dir, code):
                "run_id": run_id, "gpu": runtime.gpu, "startup_seconds": startup_seconds,
                "provenance": provenance, "selected_videos": len(rows),
                "owned_temporary_path": str(work_dir), "cleanup": "TemporaryDirectory finally"})
-        from eval.mbench._upstream.core.item import EvaluationItem, Media, VideoRef, ArtifactRef
-        from eval.mbench._upstream.metrics.video_io import sample_bgr_frames
+        from mbench.core.item import EvaluationItem, Media, VideoRef, ArtifactRef
         for position, row in enumerate(rows):
             key = record_id(row)
             destination = records_dir / (key + ".json")
@@ -129,7 +93,6 @@ def _run_locked(args, rows, output, records_dir, code):
                 prior = json.loads(destination.read_text())
                 if prior["input_sha256"] != input_sha:
                     raise RuntimeError("Existing score binding differs: " + str(destination))
-                records.append(prior)
                 print(json.dumps({"event": "REUSED", "model_id": row["model_id"],
                                   "item_id": row["item_id"], "record": str(destination)}), flush=True)
                 continue
@@ -139,7 +102,7 @@ def _run_locked(args, rows, output, records_dir, code):
                 torch.cuda.reset_peak_memory_stats(args.device)
             item = EvaluationItem(row["item_id"], media=Media(videos=[VideoRef(video["path"])]),
                                   model_id=row["model_id"],
-                                  metadata={"subset": args.family, "sample_id": row.get("sample_id"),
+                                  metadata={"subset": FAMILY, "sample_id": row.get("sample_id"),
                                             "condition_id": row.get("condition_id")})
             metric_results, metric_seconds, errors = {}, {}, []
             producer = None
@@ -148,18 +111,12 @@ def _run_locked(args, rows, output, records_dir, code):
             with tempfile.TemporaryDirectory(prefix="video_", dir=work_dir) as video_work:
                 try:
                     metadata = video_metadata(video["path"])
-                    if args.family == "environment":
-                        producer_started = time.monotonic()
-                        try:
-                            artifact, producer = runtime.prepare_da3(row, Path(video_work) / "da3")
-                            item.artifacts["da3"] = ArtifactRef(name="da3", path=str(artifact), format="npz")
-                        finally:
-                            producer_seconds = time.monotonic() - producer_started
-                    else:
-                        sampled, indices = sample_bgr_frames(video["path"], 32)
-                        metadata["sampled_frame_indices"] = indices
-                        metadata["sampled_decoded_frames"] = len(sampled)
-                        del sampled
+                    producer_started = time.monotonic()
+                    try:
+                        artifact, producer = runtime.prepare_da3(row, Path(video_work) / "da3")
+                        item.artifacts["da3"] = ArtifactRef(name="da3", path=str(artifact), format="npz")
+                    finally:
+                        producer_seconds = time.monotonic() - producer_started
                 except Exception as exc:
                     errors.append({"stage": "producer", "error": str(exc),
                                    "traceback": traceback.format_exc()})
@@ -200,7 +157,7 @@ def _run_locked(args, rows, output, records_dir, code):
                            if unit.get("error")]
             processing_errors = errors + unit_errors
             timing = {"run_id": run_id, "record_id": key, "model_id": row["model_id"],
-                      "item_id": row["item_id"], "family": args.family, "stage": "evaluation",
+                      "item_id": row["item_id"], "family": FAMILY, "stage": "evaluation",
                       "elapsed_seconds": elapsed, "family_seconds": elapsed,
                       "producer_seconds": producer_seconds, "metric_seconds": metric_seconds,
                       "startup_seconds": startup_seconds if position == 0 else 0.0,
@@ -209,7 +166,7 @@ def _run_locked(args, rows, output, records_dir, code):
                       "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated(args.device) if args.device.startswith("cuda:") else 0,
                       "gpu": runtime.gpu}
             record = {"schema": "mem6.score.v1", "created_utc": now(), "run_id": run_id,
-                      "record_id": key, "input_sha256": input_sha, "family": args.family,
+                      "record_id": key, "input_sha256": input_sha, "family": FAMILY,
                       "item_id": row["item_id"], "model_id": row["model_id"],
                       "condition_id": row.get("condition_id"), "sample_id": row.get("sample_id"),
                       "status": "PARTIAL_PROCESSING_FAILURE" if processing_errors and valid_metrics else
@@ -222,58 +179,32 @@ def _run_locked(args, rows, output, records_dir, code):
                       "timings": timing, "errors": errors, "processing_errors": processing_errors,
                       "cleanup": {"video_temporary_workspace_removed": True}}
             atomic(destination, record)
-            records.append(record)
-            atomic(output / "PROGRESS.json", {"run_id": run_id, "completed": len(records),
-                   "selected": len(rows), "last_record": str(destination), "updated_utc": now()})
             print(json.dumps({"event": "SCORED", "model_id": row["model_id"],
                               "item_id": row["item_id"], "status": record["status"],
                               "elapsed_seconds": elapsed, "record": str(destination)}), flush=True)
-        _aggregate(records, output)
-        atomic(output / "TIMING.json", {"schema": "mem6.timing.v1", "run_id": run_id,
-               "family": args.family, "startup_seconds": startup_seconds,
-               "wall_seconds": time.monotonic() - started,
-               "records": [record["timings"] for record in records],
-               "note": "One timing per video/family. Shared DA3 is counted once; GPU-seconds are elapsed wall seconds only for a CUDA device."})
-    atomic(output / "DONE.json", {"schema": "mem6.partition.v1", "run_id": run_id,
-           "status": "COMPLETE", "selected_videos": len(rows), "records": len(records),
-           "measured": sum(record["status"] == "MEASURED" for record in records),
-           "invalid_or_partial": sum(record["status"] != "MEASURED" for record in records),
-           "created_utc": now(), "temporary_workspace_removed": not Path(work).exists(),
-           "owned_children_remaining": []})
     return 0
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run", help="Score a partition using locally prepared weights")
+    run = commands.add_parser("run", help="Score the environment videos of a manifest using locally prepared weights")
     run.add_argument("--manifest", required=True)
     run.add_argument("--weights-dir", required=True)
-    run.add_argument("--family", choices=tuple(FAMILIES), required=True)
     run.add_argument("--output", required=True)
     run.add_argument("--work-dir", required=True)
     run.add_argument("--device", default="cuda:0")
-    run.add_argument("--model")
-    run.add_argument("--index", type=int)
-    run.add_argument("--limit", type=int)
-    run.add_argument("--shard-index", type=int, default=0)
-    run.add_argument("--shard-count", type=int, default=1)
     table = commands.add_parser("aggregate", help="Aggregate saved canonical receipts without loading models")
     table.add_argument("--manifest", action="append", required=True)
     table.add_argument("--records", action="append", required=True)
     table.add_argument("--output", required=True)
     table.add_argument("--iterations", type=int, default=20000)
     table.add_argument("--seed", type=int, default=45)
-    commands.add_parser("describe", help="Print frozen protocol and verify code pins without GPU imports")
     args = parser.parse_args(argv)
     try:
         if args.command == "aggregate":
             from ..aggregation import aggregate_files
             aggregate_files(args.manifest, args.records, Path(args.output), args.seed, args.iterations)
-            return 0
-        if args.command == "describe":
-            print(json.dumps({"code": verify_code(), "protocol": json.loads(
-                (PACKAGE / "PROTOCOL.json").read_text())}, indent=2))
             return 0
         return _run(args)
     except Exception as exc:

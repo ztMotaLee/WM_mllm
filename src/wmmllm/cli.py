@@ -20,14 +20,12 @@ def _resolve_config(args, root):
     saved=read_json(saved_path,run_root=root) if saved_path.exists() and not args.config else None
     return load_config(args.config,env_file=args.env_file,overrides=saved)
 
-def _providers(args, root, config=None):
+def _engine(root, config):
     from .budget import BudgetController
     from .providers.factory import create_providers
     from .agent.executor import EngineDeps
-    config=config if config is not None else _resolve_config(args, root)
     if config.video.size != (1344,768) or config.image.view_output_size != (1344,768):
         raise ConfigError('Core sessions require a 1344x768 viewport and image output; no request was sent.')
-    root.mkdir(parents=True,exist_ok=True)
     checkpoint=root/'budget'/'checkpoint.json'
     def persist(value):write_atomic(checkpoint,value,run_root=root)
     if checkpoint.exists():
@@ -37,8 +35,7 @@ def _providers(args, root, config=None):
         budget=BudgetController(config.budget,checkpoint=persist)
         persist(budget.snapshot())
     logger=get_logger()
-    providers=create_providers(config,budget=budget,logger=logger)
-    return EngineDeps(config,providers,budget,root,logger)
+    return EngineDeps(config,create_providers(config,budget=budget,logger=logger),budget,root,logger)
 
 def main(argv: Sequence[str] | None=None) -> int:
     parser=_Parser(prog='wmmllm',description='Persistent panorama world model')
@@ -50,8 +47,6 @@ def main(argv: Sequence[str] | None=None) -> int:
     step=commands.add_parser('step');step.add_argument('--run',type=Path,required=True);step.add_argument('instruction')
     session=commands.add_parser('session');session.add_argument('--run',type=Path,required=True);session.add_argument('--script',type=Path,required=True)
     view=commands.add_parser('view');view.add_argument('--run',type=Path,required=True);view.add_argument('--yaw',type=float,required=True);view.add_argument('--pitch',type=float,required=True);view.add_argument('--out',type=Path,required=True)
-    export=commands.add_parser('export-viewer');export.add_argument('--run',type=Path,required=True);export.add_argument('--out',type=Path,required=True)
-    export.add_argument('--procedural-fixture',action='store_true',help='Label locally drawn procedural playback.')
     check=commands.add_parser('check-config')
     for sub in (init,resume,step,session,check):sub.add_argument('--config',type=Path);sub.add_argument('--env-file',type=Path)
     args=parser.parse_args(argv);deps=None;runtime_guard=None
@@ -60,12 +55,6 @@ def main(argv: Sequence[str] | None=None) -> int:
             config=load_config(args.config,env_file=args.env_file)
             print(json.dumps({'chat_key_present':bool(config.chat.api_key),'image_key_present':bool(config.image.api_key),'chat_model_present':bool(config.chat.model),'image_model_present':bool(config.image.model),'configuration_valid':True},sort_keys=True));return 0
         root=args.run.resolve()
-        if args.command=='export-viewer':
-            from .export_viewer import export_bundle, ExportError
-            try:export_bundle(args.run,args.out,procedural_fixture=args.procedural_fixture)
-            except ExportError as error:
-                print(f'Export rejected: {error}',file=sys.stderr);return 1
-            print('Viewer exported. Serve the output directory with a local HTTP server.');return 0
         if args.command=='view':
             import math
             from PIL import Image
@@ -83,7 +72,7 @@ def main(argv: Sequence[str] | None=None) -> int:
         from .session.io import file_lock
         runtime_guard=file_lock(root/'runtime.lock',run_root=root)
         runtime_guard.__enter__()
-        deps=_providers(args,root,config=config)
+        deps=_engine(root,config)
         from .session.runner import SessionRunner
         runner=SessionRunner(root,deps=deps)
         if args.command=='init':
@@ -99,8 +88,8 @@ def main(argv: Sequence[str] | None=None) -> int:
                 print(json.dumps(_session_summary(record)))
                 return 0
             for turn in turns:
-                caption=turn if isinstance(turn,str) else turn['instruction'];metadata=None if isinstance(turn,str) else turn.get('metadata')
-                print(json.dumps(_turn_summary(runner.step(caption,metadata=metadata)),ensure_ascii=False),flush=True)
+                caption=turn if isinstance(turn,str) else turn['instruction']
+                print(json.dumps(_turn_summary(runner.step(caption)),ensure_ascii=False),flush=True)
         return 0
     except ConfigError as error:print(str(error),file=sys.stderr);return 2
     except Exception as error:print(json.dumps({'status':'error','error':safe_error(error)}),file=sys.stderr);return 1

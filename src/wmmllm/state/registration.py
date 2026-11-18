@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-from pathlib import Path
-from typing import Any
 
 import cv2
 import numpy as np
@@ -32,13 +30,6 @@ class RegistrationFailure(ValueError):
             'target_shape':list(target_shape),'policy':dict(POLICY),
             'candidates':candidates,'extra':extra or {},'accepted':False,
             'thresholds_relaxed':False,'additional_image_attempts':0}
-
-
-def _rgb(value):
-    if isinstance(value,(str,Path)):
-        from PIL import Image
-        return np.asarray(Image.open(value).convert('RGB'))
-    return np.asarray(value,dtype=np.uint8)
 
 
 def _metrics(H,src,dst,inlier,source_shape,target_shape,*,stage):
@@ -114,7 +105,7 @@ def _matches(source,target,extractor,ratio,reciprocal):
 
 
 def registration_candidates(source,target,*,stage='erp',include_fallbacks=True):
-    source,target=_rgb(source),_rgb(target)
+    source,target=panorama.rgb_array(source),panorama.rgb_array(target)
     rows=[]
     recipes=[('SIFT',.72,False)]
     if include_fallbacks:recipes += [('SIFT',.8,True),('SIFT_dense',.8,True),('ORB',.78,True)]
@@ -149,7 +140,7 @@ def select_registration(source,target,*,stage='erp'):
         return np.asarray(incumbent['source_to_generated_H']),meta
     rows=registration_candidates(source,target,stage=stage)
     passed=[r for r in rows if r['passed'] and r['reciprocal']]
-    if not passed:raise RegistrationFailure('source registration fails v5 distributed support/orientation gates',stage=stage,candidates=rows,source_shape=_rgb(source).shape,target_shape=_rgb(target).shape)
+    if not passed:raise RegistrationFailure('source registration fails v5 distributed support/orientation gates',stage=stage,candidates=rows,source_shape=panorama.rgb_array(source).shape,target_shape=panorama.rgb_array(target).shape)
     # Preserve a valid incumbent; then prefer reciprocal distributed support with a simpler model.
     incumbent=next((r for r in passed if r['extractor']=='SIFT' and not r['reciprocal'] and r['model']=='homography'),None)
     selected=incumbent or max(passed,key=lambda r:(r['inliers']*min(r['source_hull_fraction'],.6),{'similarity':2,'affine':1,'homography':0}[r['model']],-r['inlier_rmse_pixels']))
@@ -225,7 +216,7 @@ def _legacy_native_crop(raw,reference,source,valid):
 
 
 def register_native_context(generated,canvas,mask,*,collar_px=32):
-    g=panorama;raw,reference=_rgb(generated),_rgb(canvas);known=np.asarray(mask)==0
+    g=panorama;raw,reference=panorama.rgb_array(generated),panorama.rgb_array(canvas);known=np.asarray(mask)==0
     ys,xs=np.nonzero(known)
     if not len(xs):raise ValueError('native source mask is empty')
     l,t,r,b=int(xs.min()),int(ys.min()),int(xs.max())+1,int(ys.max())+1

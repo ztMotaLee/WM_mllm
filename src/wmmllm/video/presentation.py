@@ -4,24 +4,19 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
-import math
+import shutil
 import numpy as np
 from PIL import Image
 
 from wmmllm.providers.types import VideoTransition, VideoBackend, PresentationResult
-from wmmllm.state.panorama import render_view, panorama_state_sha256, pixel_sha256
-from wmmllm.memory.store import checked_path
-from wmmllm.session.io import file_ref, verify_ref, write_once, read_json
-from .cpu import render_rotation_video, render_known_return_video, encode_hold_video
+from wmmllm.state.panorama import render_view, panorama_state_sha256
+from wmmllm.session.io import _local, file_ref, verify_ref, write_once, read_json
+from .cpu import render_rotation_video, encode_hold_video
 
 
 def _output(transition: VideoTransition, run_root: Path) -> Path:
     path = transition.output_path or Path(run_root) / 'transitions' / transition.transition_id / 'video.mp4'
-    return checked_path(path, Path(run_root).resolve(), must_exist=False)
-
-
-def _node_image(node: Mapping[str, Any]):
-    return node.get('view', node.get('endpoint'))
+    return _local(path, run_root=run_root, must_exist=False)
 
 
 def _pixels(path: Path):
@@ -52,7 +47,7 @@ def _verify_camera_endpoints(panorama, source_node, target_node, transition, pro
 def _presentation_value(result, transition, profile, *, run_root):
     video = None
     if result.video_path is not None:
-        path = checked_path(result.video_path, Path(run_root).resolve())
+        path = _local(result.video_path, run_root=run_root)
         if path.stat().st_size == 0:
             raise ValueError('Presentation video is empty')
         video = file_ref(path, run_root=run_root)
@@ -69,20 +64,16 @@ def _presentation_value(result, transition, profile, *, run_root):
 
 def present_transition(transition: VideoTransition, *, panorama: dict,
                        source_node: Mapping[str, Any], target_node: Mapping[str, Any],
-                       backend: VideoBackend, profile: Mapping[str, Any], run_root: Path,
-                       depth_record: Mapping[str, Any] | None = None) -> PresentationResult:
+                       backend: VideoBackend, profile: Mapping[str, Any], run_root: Path) -> PresentationResult:
     """Dispatch CPU camera paths or the injected backend and bind unchanged authority."""
     root = Path(run_root).resolve()
-    if (int(profile['num_frames']) < 2 or not math.isfinite(float(profile['fps']))
-            or float(profile['fps']) <= 0):
-        raise ValueError('Presentation requires at least two frames and positive finite FPS')
     output = _output(transition, root)
     for path in (transition.first_frame, transition.last_frame):
-        checked_path(path, root)
+        _local(path, run_root=root)
     first_ref = file_ref(transition.first_frame, run_root=root, image=True)
     last_ref = file_ref(transition.last_frame, run_root=root, image=True)
     for node, actual in ((source_node, first_ref), (target_node, last_ref)):
-        ref = _node_image(node)
+        ref = node.get('view')
         if ref is not None:
             verify_ref(ref, run_root=root)
             if ref['sha256'] != actual['sha256']:
@@ -111,41 +102,15 @@ def present_transition(transition: VideoTransition, *, panorama: dict,
             start_yaw=start['yaw'], end_yaw=end['yaw'], start_pitch=start['pitch'],
             end_pitch=end['pitch'], hfov=end.get('hfov', 90), width=int(profile['width']),
             height=int(profile['height']), num_frames=int(profile['num_frames']),
-            fps=float(profile['fps']), lossless=True, run_root=root)
+            fps=float(profile['fps']), run_root=root)
         if report['video'] is None:
             result = PresentationResult('none', None, 'none', report['reason'])
         else:
             result = PresentationResult('rendered', output,
                 'cpu_panorama_rotation' if transition.operation == 'rotate' else 'cpu_known_return')
-    elif transition.operation == 'revisit' and depth_record is not None:
-        # A cross-origin clip additionally binds both supplied geometry states.
-        source_state = source_node.get('panorama_state', {}).get('panorama_state_sha256')
-        target_state = target_node.get('panorama_state', {}).get('panorama_state_sha256')
-        eligible = (source_state is not None and target_state is not None
-            and depth_record.get('source_state_sha256') == source_state
-            and depth_record.get('target_state_sha256') == target_state
-            and depth_record.get('source_physical_revision') == source_node.get('physical_revision')
-            and depth_record.get('physical_revision') == target_node.get('physical_revision')
-            and depth_record.get('source_viewport_profile') == source_node.get('viewport_profile')
-            and depth_record.get('target_viewport_profile') == target_node.get('viewport_profile'))
-        if eligible:
-            report = render_known_return_video(depth_record, first_ref, target_node, output,
-                width=int(profile['width']), height=int(profile['height']),
-                num_frames=int(profile['num_frames']), fps=float(profile['fps']), run_root=root)
-            if report['status'] == 'READY':
-                result = PresentationResult('rendered', output, 'cpu_known_return')
-            else:
-                result = backend.present(transition)
-                if result.status == 'none':
-                    result = replace(result, reason='Supplied return geometry cannot support every intermediate ray; generated video is unavailable.')
-        else:
-            result = backend.present(transition)
-            if result.status == 'none':
-                result = replace(result, reason='Return geometry is unavailable for these exact states and viewport profiles; generated video is unavailable.')
     elif transition.operation == 'failure_hold':
         if first_ref['pixel_sha256'] != last_ref['pixel_sha256']:
             raise ValueError('Failure hold endpoints differ')
-        import shutil
         if shutil.which('ffmpeg'):
             encode_hold_video(first_ref, dict(profile), output, run_root=root)
             result = PresentationResult('rendered', output, 'cpu_failure_hold')
@@ -164,6 +129,3 @@ def present_transition(transition: VideoTransition, *, panorama: dict,
     write_once(receipt_path, value, run_root=root)
     return result
 
-
-def read_presentation_receipt(transition: VideoTransition, *, run_root: Path) -> dict:
-    return read_json(_output(transition, run_root).with_suffix('.presentation.json'), run_root=run_root)

@@ -1,10 +1,19 @@
 # MBench-A recovery evaluator
 
-This port contains the four environment metrics used for the recovery comparison:
-Epipolar, Reprojection, Lighting, and Style. It uses MBench commit
-`c44dbd9dfa0278be728bda2101b0fb96f8547f11` from
-[study-overflow/MBench](https://github.com/study-overflow/MBench).
-The derived code retains its MIT notices and [complete license](LICENSE.upstream).
+This adapter scores the four environment metrics used for the recovery comparison:
+Epipolar, Reprojection, Lighting, and Style, with the upstream MBench (MIT) code at
+commit `c44dbd9dfa0278be728bda2101b0fb96f8547f11` from
+[study-overflow/MBench](https://github.com/study-overflow/MBench). No MBench source
+is included. Clone that commit and put the checkout on `PYTHONPATH`; the upstream
+package cannot be pip-installed at that commit:
+
+```bash
+git clone https://github.com/study-overflow/MBench && git -C MBench checkout c44dbd9dfa0278be728bda2101b0fb96f8547f11
+export PYTHONPATH=$PWD/MBench
+```
+
+[CODE_LOCK.json](CODE_LOCK.json) pins the SHA-256 of the 18 imported upstream files
+and of this adapter; the scorer refuses to run on any mismatch.
 The action-conditioned metrics require no API judge. Human, object, causal, and
 text-conditioned metrics are outside this port.
 
@@ -84,25 +93,23 @@ Download URLs and external availability were not checked during this offline por
 Run from the release root with a prepared evaluation environment:
 
 ```bash
-python -B -m eval.mbench.mem6_scorer describe
 python -B -m eval.mbench.mem6_scorer run \
-  --manifest scoring_inputs.jsonl --family environment \
-  --weights-dir weights --output scores/method_a --work-dir work \
-  --device cuda:0
+  --manifest scoring_inputs.jsonl --weights-dir weights \
+  --output scores/method_a --work-dir work --device cuda:0
 ```
 
 `--device cpu` is supported by the wrapper and is unvalidated for full model
 inference. Each row needs `model_id`, `item_id`, `subset: "environment"`, and
 `video_path`; optional `condition_id`, `sample_id`, and `sha256` bind the video.
 JSON arrays and JSONL work. Relative video paths resolve against the manifest.
-Duplicate model/item rows fail. Optional `--model`, `--index`, `--limit`, and
-`--shard-index/--shard-count` preserve partition order. Concurrent invocations
-need separate output directories. Input/code/weights/protocol hashes bind reused
-records; changed bindings fail. Temporary per-video artifacts are removed on exit.
+Duplicate model/item rows fail. The scorer scores every environment row in
+manifest order. Use one output directory per invocation. Input/code/weights/protocol
+hashes bind reused records; changed bindings fail. Temporary per-video artifacts
+are removed on exit.
 
 Output `records/*.json` preserves official units, raw item diagnostics, projected
 items, summary, validity, input binding, and timing. Official summary arithmetic
-can retain diagnostic scores from invalid items. For a paper table, use the
+can retain diagnostic scores from invalid items, so the paper table uses the
 valid-only aggregation below. A finite score with `valid: false`, or `valid:
 true` without a finite non-boolean score, is unmeasured.
 

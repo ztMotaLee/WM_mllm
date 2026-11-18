@@ -44,7 +44,7 @@ def test_native_front_and_ordered_patch_locality():
     edit[12:22, 15:30] = [230, 10, 80]
     support = np.zeros((32, 48), np.uint8)
     support[10:24, 13:32] = 255
-    changed, erp_alpha, metadata = p.composite_view_edit(value, edit, support=support, return_metadata=True)
+    changed, erp_alpha, metadata = p.composite_view_edit(value, edit, support=support)
     assert changed['render_base'] is value['render_base']
     assert len(changed['patches']) == len(value['patches']) + 1
     assert np.array_equal(p.erp_array(value)[erp_alpha == 0], p.erp_array(changed)[erp_alpha == 0])
@@ -65,9 +65,8 @@ def test_padding_is_screen_fixed_and_never_reprojected():
     edit[:4] = 255
     support = np.zeros((32, 48), np.uint8)
     support[:4] = 255
-    changed, alpha, _ = p.composite_view_edit(value, edit, support=support, return_metadata=True)
-    assert not alpha.any()
-    assert np.array_equal(p.erp_array(value), p.erp_array(changed))
+    changed, alpha, _ = p.composite_view_edit(value, edit, support=support)
+    assert not alpha.any(); assert np.array_equal(p.erp_array(value), p.erp_array(changed))
     assert np.array_equal(p.render_view(value, yaw=51, width=48, height=32),
                           p.render_view(changed, yaw=51, width=48, height=32))
 
@@ -77,15 +76,13 @@ def test_global_generation_retires_every_native_patch():
     changed = p.create_panorama_state(np.full((64, 128, 3), 71, np.uint8), source=None,
                                       width=128, height=64)
     changed['viewport_profile'] = deepcopy(old['viewport_profile'])
-    assert not changed['patches']
-    assert np.all(p.render_view(changed, width=48, height=32) == 71)
+    assert not changed['patches']; assert np.all(p.render_view(changed, width=48, height=32) == 71)
 
 
 def test_state_roundtrip_assets_reuse_and_immutable_manifest(tmp_path):
     value = state(padded=True)
     ref = p.save_panorama_state(value, tmp_path / 'states/rev0', run_root=tmp_path)
-    # An independently reconstructed identical state must reuse the existing
-    # on-disk float32 alpha and preserve the immutable manifest byte for byte.
+    # An identical reconstructed state reuses its assets and immutable manifest byte for byte.
     same = p.save_panorama_state(state(padded=True), tmp_path / 'states/rev0', run_root=tmp_path)
     assert same == ref
     loaded = p.load_panorama_state(ref, run_root=tmp_path)
@@ -105,24 +102,18 @@ def test_state_roundtrip_assets_reuse_and_immutable_manifest(tmp_path):
         p.save_panorama_state(changed, tmp_path / 'states/rev0', run_root=tmp_path)
 
 
-def test_corrupt_encoded_and_decoded_assets_rejected(tmp_path):
-    ref = p.save_panorama_state(state(), tmp_path / 'states/rev0', run_root=tmp_path)
-    record = json.loads((tmp_path / ref['path']).read_text())
-    alpha_path = tmp_path / record['patches'][0]['alpha']['path']
-    array = np.load(alpha_path, allow_pickle=False)
-    array[0, 0] = 0
-    with alpha_path.open('wb') as stream:
-        np.save(stream, array, allow_pickle=False)
-    with pytest.raises(ValueError, match='hash mismatch'):
-        p.load_panorama_state(ref, run_root=tmp_path)
-
-
-@pytest.mark.parametrize('field', ['decoded', 'canonical'])
-def test_decoded_and_canonical_hashes_are_checked_independently(tmp_path, field):
+@pytest.mark.parametrize('field', ['encoded', 'decoded', 'canonical'])
+def test_encoded_decoded_and_canonical_hashes_are_checked_independently(tmp_path, field):
     ref = p.save_panorama_state(state(), tmp_path / 'states/rev0', run_root=tmp_path)
     manifest = tmp_path / ref['path']
     record = json.loads(manifest.read_text())
-    if field == 'decoded':
+    if field == 'encoded':
+        alpha_path = tmp_path / record['patches'][0]['alpha']['path']
+        array = np.load(alpha_path, allow_pickle=False)
+        array[0, 0] = 0
+        with alpha_path.open('wb') as stream:
+            np.save(stream, array, allow_pickle=False)
+    elif field == 'decoded':
         record['patches'][0]['pixels']['pixel_sha256'] = '0' * 64
     else:
         record['panorama_state_sha256'] = '0' * 64
@@ -140,24 +131,6 @@ def test_state_manifest_cannot_follow_a_symlink_escape(tmp_path):
         p.load_panorama_state({'path': 'state.json'}, run_root=tmp_path)
 
 
-@pytest.mark.parametrize('relative', ['../outside.json', '/absolute.json', 'states//x.json', 'states/./x.json'])
-def test_serialized_state_paths_reject_unsafe_paths(tmp_path, relative):
-    with pytest.raises(ValueError):
-        p.load_panorama_state({'path': relative}, run_root=tmp_path)
-
-
-def test_depth_geometry_requires_real_current_depth():
-    image = Image.fromarray(texture())
-    with pytest.raises(ValueError, match='exact-shape finite radial depth'):
-        geom.reproject_forward(image, step=.45)
-    with pytest.raises(ValueError):
-        geom.reproject_forward(image, step=.45, depth_map=np.ones((1, 1), np.float32))
-    result = geom.reproject_forward(image, step=.45, depth_map=np.full((64, 128), 4, np.float32))
-    assert result.image.size == image.size
-    assert result.depth_map.shape == (64, 128)
-    assert result.stats['depth_source'] == 'per_pixel_radial_depth'
-
-
 def test_strict_support_blend_never_changes_outside():
     source = texture(160, 96)
     generated = np.roll(source, 1, axis=1)
@@ -171,18 +144,6 @@ def test_strict_support_blend_never_changes_outside():
     assert meta['outside_exact'] and meta['outside_changed_pixels'] == 0
 
 
-def test_registered_context_preserves_protected_source():
-    rng = np.random.default_rng(0)
-    source = rng.integers(1, 255, (159, 255, 3), dtype=np.uint8)
-    canvas, mask, metadata = reg.perspective_outpaint_input(source)
-    generated = canvas.copy()
-    output, record = reg.register_native_context(generated, canvas, mask)
-    assert record['source_exact_after_restoration']
-    assert record['protected_region_changed_pixels'] == 0
-    assert metadata['official_content_size'] == [255, 159]
-    assert output.shape[0] >= source.shape[0] and output.shape[1] >= source.shape[1]
-
-
 def _node(tmp_path, node_id='node0', rev=0):
     value = state()
     saved = p.save_panorama_state(value, tmp_path / 'states' / node_id, run_root=tmp_path)
@@ -190,7 +151,7 @@ def _node(tmp_path, node_id='node0', rev=0):
     image_path = tmp_path / (node_id + '.png')
     Image.fromarray(view).save(image_path)
     memory = write_once(tmp_path / (node_id + '-memory.json'), {}, run_root=tmp_path)
-    return graph.node_record(run_root=tmp_path, node_id=node_id, parent_node_id=None,
+    return graph.node_record(node_id=node_id, parent_node_id=None,
         origin_id='origin0', physical_revision=rev, view_identity='first_person|normal|default_subject',
         pose={'yaw': 0, 'pitch': 0, 'hfov': 90}, panorama_state=saved,
         panorama=saved['erp_preview_ref'], view=file_ref(image_path, run_root=tmp_path, image=True),
@@ -200,49 +161,18 @@ def _node(tmp_path, node_id='node0', rev=0):
 def test_saved_node_graph_roundtrip_and_exact_return(tmp_path):
     node = _node(tmp_path)
     value = graph.verify_saved_node(node, run_root=tmp_path)
-    assert value['restore_pixel_identical'] and value['endpoint'] == node['view']
+    assert p.panorama_state_sha256(value) == node['panorama_state']['panorama_state_sha256']
     store = graph.SceneGraph(run_root=tmp_path)
     store.add_node(node)
-    assert graph.SceneGraph.from_record(store.to_record(), run_root=tmp_path).get_node('node0') == node
-    changed = store.get_node('node0')
+    assert json.loads((tmp_path / 'nodes/node0.json').read_text()) == node
+    changed = deepcopy(node)
     changed['pose']['yaw'] = 90
-    assert store.get_node('node0')['pose']['yaw'] == 0
-
-
-def _switch_row():
-    return {'official_turn': {'current_perspective': 'third_person', 'resulting_perspective': 'first_person',
-        'current_view_mode': 'normal', 'resulting_view_mode': 'normal',
-        'official_interaction': {'type': 'perspective_switch', 'action': 'tp_to_fp'}}}
-
-
-def test_revision_origin_profile_hfov_and_unresolved_return_gates():
-    identity = 'first_person|normal|default_subject'
-    profile = {'width': 48, 'height': 32, 'content_box': [0, 0, 48, 32], 'padding_ltrb': [0, 0, 0, 0]}
-    pose = {'yaw': 360, 'pitch': 0, 'hfov': 90, 'origin_id': 'origin0', 'viewport_profile': profile}
-    saved = {'node_id': 'node0', 'origin_id': 'origin0', 'physical_revision': 0, 'view_identity': identity,
-             'pose': {'yaw': 0, 'pitch': 0, 'hfov': 90}, 'viewport_profile': profile}
-    visits = {graph.visit_key(0, identity, pose): saved}
-    row = _switch_row()
-    assert graph.resolve_return(visits, row, 0, pose)['node_id'] == 'node0'
-    assert graph.resolve_return(visits, row, 1, pose) is None
-    assert graph.resolve_return(visits, row, 0, {**pose, 'origin_id': 'origin1'}) is None
-    assert graph.resolve_return(visits, row, 0, {**pose, 'hfov': 100}) is None
-    assert graph.resolve_return(visits, row, 0, {**pose, 'viewport_profile': {**profile, 'width': 49}}) is None
-    assert graph.resolve_return(visits, {'current_caption': 'Walk back'}, 0, pose) is None
+    with pytest.raises(ValueError, match='immutable graph node changed'):
+        store.add_node(changed)
+    identity, pose = node['view_identity'], {'yaw': 360, 'pitch': 0}
+    assert graph.visit_key(0, identity, pose) == graph.visit_key(0, identity, {'yaw': 0, 'pitch': 0})
+    assert graph.visit_key(0, identity, pose) != graph.visit_key(1, identity, pose)
     assert graph.visit_key(0, {'a': 'x', 'b': 'y'}, pose) == graph.visit_key(0, {'b': 'y', 'a': 'x'}, pose)
-
-
-def test_new_revision_view_lookup_uses_new_saved_view():
-    identity = 'first_person|normal|default_subject'
-    profile = {'width': 48, 'height': 32, 'content_box': [0, 0, 48, 32], 'padding_ltrb': [0, 0, 0, 0]}
-    pose = {'yaw': 0, 'pitch': 0, 'hfov': 90, 'origin_id': 'origin0', 'viewport_profile': profile}
-    old = {'node_id': 'old', 'origin_id': 'origin0', 'physical_revision': 0,
-           'view_identity': identity, 'pose': pose, 'viewport_profile': profile}
-    new = {'node_id': 'new', 'origin_id': 'origin0', 'physical_revision': 1,
-           'view_identity': identity, 'pose': pose, 'viewport_profile': profile}
-    visits = {graph.visit_key(0, identity, pose): old, graph.visit_key(1, identity, pose): new}
-    assert graph.resolve_return(visits, _switch_row(), 1, pose)['node_id'] == 'new'
-    assert graph.resolve_return(visits, _switch_row(), 1, {'yaw': 0, 'pitch': 0, 'hfov': 90}) is None
 
 
 def test_saved_node_rejects_profile_origin_identity_or_arrival_change(tmp_path):

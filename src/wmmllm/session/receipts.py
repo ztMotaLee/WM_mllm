@@ -6,7 +6,7 @@ import uuid
 
 from ..logging_utils import sanitize
 from ..providers.factory import Providers
-from .io import IntegrityError, resolve_run_path, write_once
+from .io import IntegrityError, write_once
 
 
 class ReceiptClient:
@@ -27,12 +27,6 @@ class ReceiptClient:
         write_once(path, value, run_root=self.run_root)
 
     def _invoke(self, method, request):
-        if method == 'edit':
-            try:
-                relative = Path(request.output_dir).relative_to(self.run_root).as_posix()
-            except ValueError:
-                raise IntegrityError('Image output directory lies outside the run root') from None
-            resolve_run_path(self.run_root, relative, must_exist=False)
         try:
             result = getattr(self.client, method)(request)
         except Exception as error:

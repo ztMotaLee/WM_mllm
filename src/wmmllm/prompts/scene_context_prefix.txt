@@ -1,4 +1,0 @@
-Official initial setting (not an observation or a new event):
-{scene_json}
-Current perspective: {perspective}
-Accepted end-state memory:

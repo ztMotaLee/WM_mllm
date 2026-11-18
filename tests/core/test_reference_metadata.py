@@ -19,14 +19,11 @@ def test_identity_reference_has_no_inherited_metadata(tmp_path, format):
         file_ref(source, run_root=tmp_path, image=True),
         [[[0.25, 0.25], [0.50, 0.25], [0.50, 0.50], [0.25, 0.50]]],
         tmp_path / 'reference', upscale_min_edge=64, run_root=tmp_path)
-    assert record['status'] == 'READY'
-    assert record['native_crop_source_RGB_exact'] is True
+    assert record['status'] == 'READY'; assert record['native_crop_source_RGB_exact'] is True
     with Image.open(source) as original:
         expected = original.convert('RGB').crop(tuple(record['crop_bbox'])).tobytes()
     with Image.open(verify_ref(record['native_crop'], run_root=tmp_path)) as native:
         assert native.tobytes() == expected
     for ref in (record['native_crop'], reference):
         with Image.open(verify_ref(ref, run_root=tmp_path)) as output:
-            assert output.mode == 'RGB'
-            assert output.info == {}
-            assert len(output.getexif()) == 0
+            assert output.mode == 'RGB'; assert output.info == {}; assert len(output.getexif()) == 0

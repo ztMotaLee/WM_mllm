@@ -1,15 +1,15 @@
 """Source-grounded endpoint requests, schema repair and semantic checking."""
 from __future__ import annotations
-import copy, json, hashlib, math, re
+import copy, json, re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 import numpy as np
 from PIL import Image, ImageDraw
 from ..providers.types import ChatRequest, ImageInput
 from ..prompts import read_text, read_json_data
 from ..prompts import policy
-from ..session.io import verify_ref, write_once, write_atomic
+from ..session.io import canonical_sha256, verify_ref, write_once
 
 @dataclass(frozen=True)
 class HistoryReference:
@@ -21,39 +21,20 @@ class HistoryReference:
     def to_record(self):
         return {'image': dict(self.image), 'segment': self.segment, 'state_index': self.state_index, 'role': self.role}
 
-    @classmethod
-    def from_record(cls, value):
-        return None if value is None else cls(dict(value['image']), value['segment'], value['state_index'], value['role'])
-
 @dataclass(frozen=True)
 class SegmentRequest:
-    lane: str
-    key: str
-    task_id: str
-    case_id: int
     segment: int
-    seed: int
     current_caption: str
     preceding_captions: tuple[str, ...]
     source: Mapping[str, Any]
-    source_origin: Literal['official_initial_letterboxed', 'accepted_endpoint']
     memory_payload: Mapping[str, Any]
     memory_context: Mapping[str, Any]
     historical_reference: HistoryReference | None
-    letterbox_preprocess: Mapping[str, Any] | None
-    presentation_profile: Mapping[str, Any]
     planner_duration_seconds: float
     run_root: Path | None = field(default=None, repr=False, compare=False)
 
-    def to_record(self):
-        return {'schema': 'wmmllm.endpoint_request.v1', **{k: getattr(self, k) for k in ('lane', 'key', 'task_id', 'case_id', 'segment', 'seed', 'current_caption', 'source_origin', 'planner_duration_seconds')}, 'preceding_captions': list(self.preceding_captions), 'source': dict(self.source), 'memory_payload': dict(self.memory_payload), 'memory_context': dict(self.memory_context), 'historical_reference': None if self.historical_reference is None else self.historical_reference.to_record(), 'letterbox_preprocess': self.letterbox_preprocess, 'presentation_profile': dict(self.presentation_profile)}
-
-    @classmethod
-    def from_record(cls, value, *, run_root=None):
-        return cls(value['lane'], value['key'], value['task_id'], value['case_id'], value['segment'], value['seed'], value['current_caption'], tuple(value['preceding_captions']), value['source'], value['source_origin'], value['memory_payload'], value['memory_context'], HistoryReference.from_record(value['historical_reference']), value['letterbox_preprocess'], value['presentation_profile'], value['planner_duration_seconds'], run_root)
-
     def verify_inputs(self, *, run_root):
-        for ref in [self.source, self.memory_context] + ([self.historical_reference.image] if self.historical_reference else []) + ([self.letterbox_preprocess] if self.letterbox_preprocess else []):
+        for ref in [self.source, self.memory_context] + ([self.historical_reference.image] if self.historical_reference else []):
             verify_ref(ref, run_root=run_root)
         if len(self.preceding_captions) != self.segment - 1:
             raise ValueError('preceding_captions must hold the %d earlier captions' % (self.segment - 1))
@@ -67,7 +48,6 @@ def image_input(ref, label='', *, run_root):
     return ImageInput(verify_ref(ref, run_root=run_root), label, ref['sha256'])
 
 def labelled_images(request, endpoint=None):
-    from ..prompts import read_json_data
     roles = read_json_data('image_roles.json')
     images = (image_input(request.source, roles['source'], run_root=request.run_root),)
     if endpoint is not None:
@@ -108,22 +88,13 @@ class SemanticDecision:
     def from_record(cls, value):
         return None if value is None else cls(value['status'], dict(value['verification']), tuple(value['failed']), tuple(value['uncertain']), value['reason'])
 
-def planner_request(request, feedback=None):
-    if feedback is not None:
-        verify_ref(feedback['source'], run_root=request.run_root)
-    return ChatRequest('planner', policy.planner_system(request.current_caption, request.planner_duration_seconds), labelled_images(request), policy.planner_input(list(request.preceding_captions), request.current_caption, dict(request.memory_payload), None if feedback is None else dict(feedback)), policy.planner_response_format(request.current_caption))
-
 def verifier_request(request, plan, endpoint):
     context = policy.planner_input(list(request.preceding_captions), request.current_caption, dict(request.memory_payload))
     return ChatRequest('verifier', policy.verifier_system(request.current_caption), labelled_images(request, endpoint), policy.verification_input(context, plan.as_policy_dict()), policy.VERIFIER_RESPONSE_FORMAT)
 
-def check_endpoint(chat, request, plan, endpoint):
-    checked = policy.validate_semantic_verification(policy.parse_response(chat.complete(verifier_request(request, plan, endpoint)).text))
-    d = policy.semantic_decision(checked, True)
-    return SemanticDecision(d['semantic_status'], checked, tuple(d['failed_criteria']), tuple(d['uncertain_criteria']), checked['reason'])
-
 def endpoint_request(request, *, decision, payload, editing_crop, physical_pano_ref, history=None, feedback=None):
-    from .contracts import final_bbox_schema, UI_WORLD_POLICY, planner_feedback
+    """Planner request; ``feedback`` is the checked retry feedback of attempt 2."""
+    from .contracts import UI_WORLD_POLICY, planner_feedback
     settings = read_json_data('endpoint_multiple_response_format.json' if policy.explicit_multiple_shots(request.current_caption) else 'endpoint_single_response_format.json')
     system = policy.planner_system(request.current_caption, request.planner_duration_seconds) + read_text('endpoint_planner_scope.txt') + read_text('endpoint_planner_final_bbox.txt') + UI_WORLD_POLICY
     p_in = policy.planner_input(list(request.preceding_captions), request.current_caption, payload)
@@ -136,10 +107,10 @@ def endpoint_request(request, *, decision, payload, editing_crop, physical_pano_
     images.extend((image_input(editing_crop, 'EDITING_VIEW: actual latest physical source at editing_camera; bbox and image edit refer to this view', run_root=request.run_root), image_input(physical_pano_ref, 'current entire ERP panorama for scene context; EDITING_VIEW defines the edit camera', run_root=request.run_root)))
     result = ChatRequest('planner', system, tuple(images), p_in, settings)
     if feedback is not None:
-        result = planner_feedback(result, feedback, payload['endpoint_constraints'], run_root=request.run_root)
+        result = planner_feedback(result, feedback, run_root=request.run_root)
     return result
 
-def _support_mask(bbox, width=1344, height=768):
+def support_mask(bbox, width=1344, height=768):
     b = np.asarray(bbox, dtype=float)
     if b.shape != (4,) or not np.isfinite(b).all() or np.any(b < 0) or np.any(b > 1) or (b[2] <= b[0]) or (b[3] <= b[1]):
         raise ValueError('planner scope_bbox must be a nonempty normalized rectangle')
@@ -148,6 +119,13 @@ def _support_mask(bbox, width=1344, height=768):
     x1, y1 = np.ceil(b[2:] * [width, height]).astype(int)
     out[y0:y1, x0:x1] = 255
     return out
+
+def draw_polygons(polygons, width, height):
+    image = Image.new('L', (width, height), 0)
+    draw = ImageDraw.Draw(image)
+    for polygon in polygons:
+        draw.polygon([tuple(p) for p in np.asarray(polygon, dtype=float) * [width - 1, height - 1]], fill=255)
+    return image
 
 def _validate_response(text, *, decision, caption, run_root):
     raw = copy.deepcopy(policy.parse_response(text))
@@ -159,7 +137,7 @@ def _validate_response(text, *, decision, caption, run_root):
     metadata = bound_entity_metadata(decision, raw, run_root=run_root)
     plan, repair = repair_plan_schema(raw, entity_metadata=metadata, validate_plan=policy.validate_plan, run_root=run_root)
     policy.validate_requested_shots(plan, caption)
-    permitted = _support_mask(bbox)
+    permitted = support_mask(bbox)
     if not isinstance(polygons, list):
         raise ValueError('invalid normalized support polygon')
     for polygon in polygons:
@@ -169,18 +147,14 @@ def _validate_response(text, *, decision, caption, run_root):
     if not polygons:
         raise ValueError('empty actual permitted support')
     height, width = permitted.shape
-    im = Image.new('L', (width, height), 0)
-    draw = ImageDraw.Draw(im)
-    for polygon in polygons:
-        draw.polygon([tuple(p) for p in np.asarray(polygon, dtype=float) * [width - 1, height - 1]], fill=255)
-    if not np.any(np.minimum(permitted, np.asarray(im))):
+    if not np.any(np.minimum(permitted, np.asarray(draw_polygons(polygons, width, height)))):
         raise ValueError('empty actual permitted support')
     if not isinstance(boxes, list):
         raise ValueError('invalid final_view_entity_bboxes')
     for box in boxes:
         if not isinstance(box, dict) or not isinstance(box.get('entity'), str) or (not box['entity'].strip()):
             raise ValueError('invalid final_view_entity_bboxes entity')
-        _support_mask(box['bbox'])
+        support_mask(box['bbox'])
     return (bbox, polygons, boxes, plan, repair)
 
 def endpoint_plan(*, chat, request, decision, caption, out, deps):
@@ -201,18 +175,8 @@ def endpoint_plan(*, chat, request, decision, caption, out, deps):
     bbox, polygons, boxes, plan, repair = values
     return {'scope_bbox': bbox, 'support_polygons': polygons, 'final_view_entity_bboxes': boxes, 'plan': plan, 'repair': repair, 'receipts': receipts}
 
-def _plan_sha(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 GENERIC_ENTITY = re.compile('\\b(the|this|that)\\s+(subject|object)\\b', re.I)
 GENERIC_ERROR = 'endpoint_instruction must name the affected entity instead of an unresolved subject/object'
-
-def _pointer(value: Any, pointer: str) -> Any:
-    if not pointer.startswith('/'):
-        raise ValueError('Entity metadata needs an explicit JSON pointer')
-    for token in pointer[1:].split('/'):
-        token = token.replace('~1', '/').replace('~0', '~')
-        value = value[int(token)] if isinstance(value, list) else value[token]
-    return value
 
 def _normalized(text: str) -> str:
     return ' '.join(re.findall('[a-z0-9]+', text.lower()))
@@ -266,27 +230,16 @@ def repair_plan_schema(plan: Mapping[str, Any], *, entity_metadata: Mapping[str,
         if str(exc) != GENERIC_ERROR:
             raise
     else:
-        return (accepted, {'schema': 'aiwm.w34.planner_schema_repair.v5', 'changed': False, 'plan_sha256': _plan_sha(original), 'additional_API_calls': 0})
+        return (accepted, {'schema': 'aiwm.w34.planner_schema_repair.v5', 'changed': False, 'plan_sha256': canonical_sha256(original), 'additional_API_calls': 0})
     substitutions = []
 
     def replace(match: re.Match) -> str:
         role = match.group(2).lower()
+        # ``entity_metadata`` comes from ``bound_entity_metadata`` of this same plan and decision.
         binding = entity_metadata.get(role)
-        if not isinstance(binding, Mapping):
+        if binding is None:
             raise ValueError('No unique metadata binding for unresolved ' + role)
-        record = json.loads(verify_ref(binding['source'], run_root=run_root).read_text(encoding='utf-8')) if 'path' in binding['source'] else copy.deepcopy(dict(binding['source']))
-        name = _pointer(record, binding['json_pointer'])
-        if name != binding.get('name') or not isinstance(name, str) or (not name.strip()) or GENERIC_ENTITY.search(name):
-            raise ValueError('Entity name differs from its bound metadata')
-        tokens = binding['json_pointer'].split('/')
-        if len(tokens) != 5 or tokens[1] != 'operations' or tokens[3] != 'targets':
-            raise ValueError('Entity binding must reference an actual operation target')
-        operation = record['operations'][int(tokens[2])]['operation']
-        if operation not in {'subject_action', 'local_edit'}:
-            raise ValueError('Entity target does not belong to a physical operation')
-        derived = bound_entity_metadata(binding['source'], original, run_root=run_root).get(role)
-        if derived is None or derived['name'] != name or derived['json_pointer'] != binding['json_pointer']:
-            raise ValueError('Generic entity is ambiguous or absent from the concrete endpoint description')
+        name = binding['name']
         prefix = 'The ' if match.group(1)[0].isupper() else 'the '
         text = prefix + re.sub('^(?:the|this|that)\\s+', '', name, flags=re.I)
         substitutions.append({'span': list(match.span()), 'before': match.group(0), 'after': text, 'entity_metadata': copy.deepcopy(dict(binding))})
@@ -297,4 +250,4 @@ def repair_plan_schema(plan: Mapping[str, Any], *, entity_metadata: Mapping[str,
     for key in original:
         if key != 'endpoint_instruction' and repaired[key] != original[key]:
             raise AssertionError('Planner repair modified an unrelated field')
-    return (accepted, {'schema': 'aiwm.w34.planner_schema_repair.v5', 'changed': True, 'original_plan_sha256': _plan_sha(original), 'repaired_plan_sha256': _plan_sha(repaired), 'original_endpoint_instruction': original['endpoint_instruction'], 'repaired_endpoint_instruction': repaired['endpoint_instruction'], 'substitutions': substitutions, 'additional_API_calls': 0, 'remaining_action_unchanged': repaired['remaining_action'] == original['remaining_action'], 'requires_normal_endpoint_semantic_check': True})
+    return (accepted, {'schema': 'aiwm.w34.planner_schema_repair.v5', 'changed': True, 'original_plan_sha256': canonical_sha256(original), 'repaired_plan_sha256': canonical_sha256(repaired), 'original_endpoint_instruction': original['endpoint_instruction'], 'repaired_endpoint_instruction': repaired['endpoint_instruction'], 'substitutions': substitutions, 'additional_API_calls': 0, 'remaining_action_unchanged': repaired['remaining_action'] == original['remaining_action'], 'requires_normal_endpoint_semantic_check': True})

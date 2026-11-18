@@ -1,9 +1,7 @@
-from pathlib import Path
-import json
 import numpy as np
 import pytest
 from wmmllm.session.io import (IntegrityError, ImmutableRecordChanged, resolve_run_path,
-    file_ref, verify_ref, write_atomic, write_once, save_png)
+    verify_ref, write_atomic, write_once, save_png)
 from wmmllm.state.panorama import pixel_sha256
 
 
@@ -31,7 +29,6 @@ def test_immutable_records_and_image_hash(tmp_path):
     with pytest.raises(ImmutableRecordChanged):write_once(path,{'turn':2},run_root=tmp_path)
     pixels=np.arange(12*8*3,dtype=np.uint8).reshape(8,12,3)
     ref=save_png(tmp_path/'view.png',pixels,run_root=tmp_path)
-    assert ref['pixel_sha256']==pixel_sha256(pixels)
-    assert verify_ref(ref,run_root=tmp_path)==tmp_path/'view.png'
+    assert ref['pixel_sha256']==pixel_sha256(pixels); assert verify_ref(ref,run_root=tmp_path)==tmp_path/'view.png'
     (tmp_path/'view.png').write_bytes(b'changed')
     with pytest.raises(IntegrityError):verify_ref(ref,run_root=tmp_path)

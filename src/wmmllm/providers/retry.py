@@ -5,11 +5,11 @@ import math
 import random
 import re
 import time
-from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Callable, Mapping
 
 from ..budget import BudgetError
+from ..config import RetryConfig
 from .errors import ProviderError, ProviderRefusal, TerminalQuotaError, TransportError
 
 TRANSPORT_CLASSES = frozenset({"APIConnectionError", "APITimeoutError", "InternalServerError",
@@ -82,12 +82,7 @@ def http_status(error: BaseException) -> int | None:
 def retry_after_seconds(error: BaseException, now: Callable[[], float] = time.time) -> float:
     """Numeric/date Retry-After, including wrapped SDK errors and gateway bodies."""
     values: list[object] = []
-    seen: set[int] = set()
-    current: BaseException | None = error
-    for _ in range(8):
-        if current is None or id(current) in seen:
-            break
-        seen.add(id(current))
+    for current in _exception_chain(error):
         values.append(getattr(current, "retry_after", None))
         for data in (getattr(current, "raw", None), getattr(current, "body", None)):
             if isinstance(data, dict):
@@ -103,7 +98,6 @@ def retry_after_seconds(error: BaseException, now: Callable[[], float] = time.ti
             values.append(headers.get("Retry-After"))
         # Read the message only to recover a numeric retry hint. Never store it.
         values.extend(re.findall(r"(?:retry_after|retry-after)[\"']?\s*[:=]\s*[\"']?([0-9]+(?:\.[0-9]+)?)", str(current), re.I))
-        current = current.__cause__ or current.__context__
     delays: list[float] = []
     for value in values:
         if value is None:
@@ -138,14 +132,15 @@ def classify(error: BaseException) -> ProviderError:
     return result
 
 
-@dataclass(frozen=True)
 class RetryPolicy:
-    max_attempts: int = 5
-    base_delay_seconds: float = 20.0
-    max_delay_seconds: float = 160.0
-    jitter: float = 0.2
+    """Exponential backoff with jitter; classify() stores each error's Retry-After."""
+
+    def __init__(self, config: RetryConfig | None = None) -> None:
+        self.config = config or RetryConfig()
+        self.max_attempts = self.config.max_attempts
 
     def delay(self, attempt: int, error: BaseException,
               rng: Callable[[float, float], float] = random.uniform) -> float:
-        base = min(self.max_delay_seconds, self.base_delay_seconds * 2 ** (attempt - 1))
-        return max(retry_after_seconds(error), base * rng(1 - self.jitter, 1 + self.jitter))
+        c = self.config
+        base = min(c.max_delay_seconds, c.base_delay_seconds * 2 ** (attempt - 1))
+        return max(getattr(error, "retry_after", 0.0), base * rng(1 - c.jitter, 1 + c.jitter))

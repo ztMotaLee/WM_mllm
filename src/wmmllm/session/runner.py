@@ -9,12 +9,18 @@ from typing import Mapping, Sequence
 
 from PIL import Image
 
-from .io import (IntegrityError, canonical_json, file_lock, file_ref, read_json,
-                 resolve_run_path, save_pending, validate_session, verify_ref,
+from .io import (IntegrityError, canonical_sha256, file_lock, file_ref, read_json,
+                 resolve_run_path, validate_session, verify_ref, verify_references,
                  write_atomic, write_bytes_once, write_once)
 from ..logging_utils import redact
 from ..image_io import load_rgb_image, encode_rgb_png
 from ..providers.retry import raise_if_fatal_provider_error, safe_provider_error
+from ..agent import bootstrap
+from ..agent.executor import execute_transition
+from ..agent.failures import classify_failure, exception_record
+from ..memory.store import MemoryStore
+from ..state.graph import SceneGraph, node_record, visit_key
+from ..state.panorama import load_panorama_state
 
 
 def portable_settings(config) -> dict:
@@ -58,14 +64,12 @@ class SessionRunner:
 
     @property
     def visits(self) -> dict:
-        from ..state.graph import visit_key
         result = {}
         for node in self.record['nodes']:
             result[visit_key(node['physical_revision'], node['view_identity'], node['pose'])] = node
         return result
 
     def _open_store(self):
-        from ..memory.store import MemoryStore
         self.store = MemoryStore(self.run_root / 'memory', task_id=self.record['session_id'],
                                  setting='wmmllm.core.v1', scene_id='scene0000',
                                  state_indices=(0, 1), run_root=self.run_root)
@@ -76,13 +80,11 @@ class SessionRunner:
 
     def _bootstrap_models(self) -> dict:
         # Keep configured model identities bound without serializing their names.
-        return {role: hashlib.sha256(canonical_json({'role': role,
-                    'model': getattr(self.deps.config, role).model})).hexdigest()
+        return {role: canonical_sha256({'role': role, 'model': getattr(self.deps.config, role).model})
                 for role in ('chat', 'image')}
 
     def initialize(self, initial_image: Path, *, captions: Sequence[str], seed: int = 0,
-                   source_profile: Mapping | None = None, title: str = '',
-                   panorama_width: int = 4096) -> dict:
+                   title: str = '', panorama_width: int = 4096) -> dict:
         """Start or retry initialization with the exact checkpoint-bound inputs."""
         if type(panorama_width) is not int or panorama_width < 64 or panorama_width % 2:
             raise ValueError('Panorama width must be an even integer of at least 64')
@@ -92,8 +94,7 @@ class SessionRunner:
         with file_lock(self.run_root / 'session.lock', run_root=self.run_root):
             pixels, conversion = load_rgb_image(initial_image)
             target = (1344, 768)
-            if source_profile is not None and pixels.size != target:
-                raise ValueError('Explicit source padding metadata requires a 1344x768 input image')
+            source_profile = {'content_box': [0, 0, target[0], target[1]], 'padding_ltrb': [0, 0, 0, 0]}
             if pixels.size != target:
                 scale = min(target[0] / pixels.width, target[1] / pixels.height)
                 size = (max(1, round(pixels.width * scale)), max(1, round(pixels.height * scale)))
@@ -101,11 +102,8 @@ class SessionRunner:
                 left, top = (target[0] - size[0]) // 2, (target[1] - size[1]) // 2
                 pixels = Image.new('RGB', target, (0, 0, 0))
                 pixels.paste(content, (left, top))
-                if source_profile is None:
-                    source_profile = {'content_box': [left, top, left + size[0], top + size[1]],
-                        'padding_ltrb': [left, top, target[0]-left-size[0], target[1]-top-size[1]]}
-            if source_profile is None:
-                source_profile = {'content_box':[0,0,target[0],target[1]], 'padding_ltrb':[0,0,0,0]}
+                source_profile = {'content_box': [left, top, left + size[0], top + size[1]],
+                    'padding_ltrb': [left, top, target[0]-left-size[0], target[1]-top-size[1]]}
             encoded, _ = encode_rgb_png(pixels)
             if self.path.exists():
                 self.record = validate_session(read_json(self.path, run_root=self.run_root), run_root=self.run_root)
@@ -115,26 +113,26 @@ class SessionRunner:
                 if (checkpoint['initial_image']['sha256'] != hashlib.sha256(encoded).hexdigest() or
                         checkpoint['captions'] != captions or checkpoint['seed'] != seed or
                         checkpoint['panorama_width'] != panorama_width or
-                        read_json(checkpoint['source_profile'], run_root=self.run_root) != dict(source_profile)):
+                        read_json(checkpoint['source_profile'], run_root=self.run_root) != source_profile):
                     raise IntegrityError('Bootstrap retry inputs differ from the initialization checkpoint')
                 return self._continue_initialization(checkpoint)
             initial = write_bytes_once(self.run_root / 'inputs' / 'initial.png', encoded,
                                        run_root=self.run_root, image=True)
-            identity = hashlib.sha256(canonical_json({'image': initial, 'seed': seed})).hexdigest()[:20]
+            identity = canonical_sha256({'image': initial, 'seed': seed})[:20]
             self.record = {'schema': 'wmmllm.session.v1', 'session_id': 'session-' + identity,
                 'title': redact(title or 'Local panorama session'), 'seed': int(seed),
                 'status': 'incomplete', 'state_authority': 'accepted_panorama_and_endpoint',
                 'video_writes_state': False, 'initial_node_id': None, 'current_node_id': None,
                 'nodes': [], 'transitions': [], 'memory': None}
             settings = write_once(self.run_root / 'runtime_config.json', portable_settings(self.deps.config), run_root=self.run_root)
-            profile = write_once(self.run_root / 'inputs' / 'source_profile.json', dict(source_profile), run_root=self.run_root)
+            profile = write_once(self.run_root / 'inputs' / 'source_profile.json', source_profile, run_root=self.run_root)
             checkpoint = {'schema': 'wmmllm.bootstrap_checkpoint.v1',
                 'session_id': self.record['session_id'], 'initial_image': initial,
                 'source_profile': profile, 'captions': captions, 'seed': int(seed),
                 'panorama_width': panorama_width, 'render_profile': self.profile,
                 'runtime_settings': settings, 'models': self._bootstrap_models(),
                 'image_ingestion': conversion}
-            checkpoint['binding_sha256'] = hashlib.sha256(canonical_json(checkpoint)).hexdigest()
+            checkpoint['binding_sha256'] = canonical_sha256(checkpoint)
             write_once(self.run_root / 'bootstrap' / 'CHECKPOINT.json', checkpoint, run_root=self.run_root)
             self.record['extensions'] = {'bootstrap': {'status': 'PENDING',
                 'checkpoint': file_ref(self.run_root / 'bootstrap' / 'CHECKPOINT.json', run_root=self.run_root),
@@ -147,7 +145,7 @@ class SessionRunner:
         checkpoint = read_json(checkpoint_path, run_root=self.run_root)
         payload = {key: value for key, value in checkpoint.items() if key != 'binding_sha256'}
         if (checkpoint.get('schema') != 'wmmllm.bootstrap_checkpoint.v1' or
-                checkpoint.get('binding_sha256') != hashlib.sha256(canonical_json(payload)).hexdigest() or
+                checkpoint.get('binding_sha256') != canonical_sha256(payload) or
                 checkpoint.get('session_id') != self.record['session_id'] or
                 checkpoint.get('seed') != self.record['seed']):
             raise IntegrityError('Bootstrap initialization checkpoint binding differs')
@@ -164,16 +162,12 @@ class SessionRunner:
         return checkpoint
 
     def _continue_initialization(self, checkpoint: Mapping) -> dict:
-        from ..agent.bootstrap import initialize
-        from ..agent.failures import classify_failure, exception_record
-        from ..state.graph import node_record, SceneGraph
-        from ..state.panorama import load_panorama_state
         # Revalidate before every attempt, including an in-process retry.
         checkpoint = self._bootstrap_checkpoint()
         captions = checkpoint['captions']
         source_profile = read_json(checkpoint['source_profile'], run_root=self.run_root)
         row = {'key': self.record['session_id'], 'task_id': self.record['session_id'],
-            'segment': 1, 'lane': 'interactive', 'seed': checkpoint['seed'],
+            'segment': 1, 'seed': checkpoint['seed'],
             'initial_image': checkpoint['initial_image'],
             'current_caption': captions[0] if captions else 'Remain at the initial viewpoint.', 'profile': self.profile,
             '_item_instructions': ([{'segment': i + 1, 'caption': text} for i, text in enumerate(captions)]
@@ -212,19 +206,19 @@ class SessionRunner:
                 ready = read_json(ready_path, run_root=self.run_root)
                 payload = {key: value for key, value in ready.items() if key != 'sha256'}
                 if (ready.get('checkpoint_sha256') != checkpoint['binding_sha256'] or
-                        ready.get('sha256') != hashlib.sha256(canonical_json(payload)).hexdigest()):
+                        ready.get('sha256') != canonical_sha256(payload)):
                     raise IntegrityError('Saved bootstrap result initialization binding differs')
                 ref = self.record['extensions']['bootstrap'].get('accepted_ready')
                 if ref is not None and verify_ref(ref, run_root=self.run_root) != ready_path:
                     raise IntegrityError('Saved bootstrap result reference differs')
                 boot = ready['bootstrap']
             else:
-                boot = initialize(row, output, width=checkpoint['panorama_width'], deps=self.deps)
+                boot = bootstrap.initialize(row, output, width=checkpoint['panorama_width'], deps=self.deps)
             for key in ('panorama_state', 'panorama', 'endpoint'):
                 verify_ref(boot[key], run_root=self.run_root)
             ready = {'schema': 'wmmllm.bootstrap_ready.v1',
                      'checkpoint_sha256': checkpoint['binding_sha256'], 'bootstrap': boot}
-            ready['sha256'] = hashlib.sha256(canonical_json(ready)).hexdigest()
+            ready['sha256'] = canonical_sha256(ready)
             ready_ref = write_once(ready_path, ready, run_root=self.run_root)
             self.record['extensions']['bootstrap']['accepted_ready'] = ready_ref
             write_once(self.run_root / 'bootstrap' / 'CONTEXT.json', boot['context'], run_root=self.run_root)
@@ -234,7 +228,7 @@ class SessionRunner:
             memory = self.store.snapshot_to(self.run_root / 'memory' / 'snapshots' / 'node0000.json')
             state = load_panorama_state(boot['panorama_state'], run_root=self.run_root)
             pose = {**boot['camera'], 'hfov': 90.0}
-            node = node_record(run_root=self.run_root, node_id='node0000', parent_node_id=None,
+            node = node_record(node_id='node0000', parent_node_id=None,
                 origin_id='origin0000', physical_revision=0,
                 view_identity={'camera_origin': 'origin0000'}, pose=pose,
                 panorama_state=boot['panorama_state'], panorama=boot['panorama'], view=boot['endpoint'],
@@ -285,7 +279,6 @@ class SessionRunner:
         return self.session_record()
 
     def _load(self):
-        from ..state.graph import SceneGraph
         pending = self.run_root / 'pending'
         has_pending = pending.exists() and any(pending.glob('turn*.json'))
         self.record = validate_session(read_json(self.path, run_root=self.run_root), run_root=self.run_root,
@@ -310,22 +303,15 @@ class SessionRunner:
             if not self.record['nodes']:
                 return self._continue_initialization(self._bootstrap_checkpoint())
             self._load()
-            pending = self.run_root / 'pending'
-            if pending.exists():
-                for path in sorted(pending.glob('turn*.json')):
-                    self._recover_packet(read_json(path, run_root=self.run_root), path)
+            self._recover_pending()
             return self.session_record()
 
-    def step(self, caption: str, *, metadata: Mapping | None = None) -> dict:
-        from ..agent.executor import execute_transition
+    def step(self, caption: str) -> dict:
         if not isinstance(caption, str) or not caption.strip():
             raise ValueError('Instruction must be nonempty text')
         with file_lock(self.run_root / 'session.lock', run_root=self.run_root):
             self._load()
-            pending = self.run_root / 'pending'
-            if pending.exists():
-                for path in sorted(pending.glob('turn*.json')):
-                    self._recover_packet(read_json(path, run_root=self.run_root), path)
+            self._recover_pending()
             if self.record['status'] != 'ready':
                 raise IntegrityError('Session is not ready for another instruction')
             if (self.profile['width'], self.profile['height']) != (self.current_node['viewport_profile']['width'], self.current_node['viewport_profile']['height']):
@@ -333,22 +319,19 @@ class SessionRunner:
             index = len(self.record['transitions']) + 1
             seed = int(hashlib.sha256((self.record['session_id'] + ':' + str(index)).encode()).hexdigest()[:8], 16) % (2**31)
             row = {'key': self.record['session_id'], 'task_id': self.record['session_id'],
-                'segment': index, 'turn_index': index, 'seed': seed, 'lane': 'interactive',
-                'current_caption': caption, 'caption': caption, 'profile': self.profile}
-            if metadata:
-                forbidden = set(row) & set(metadata)
-                if forbidden:
-                    raise ValueError('Metadata cannot replace the instruction binding')
-                row.update(deepcopy(dict(metadata)))
+                'segment': index, 'seed': seed, 'current_caption': caption, 'profile': self.profile}
             return execute_transition(row, session=self, deps=self.deps)
+
+    def _recover_pending(self):
+        for path in sorted((self.run_root / 'pending').glob('turn*.json')):
+            self._recover_packet(read_json(path, run_root=self.run_root), path)
 
     def _recover_packet(self, packet: Mapping, path: Path) -> dict:
         """Replay only accepted, fully bound packets; no provider/presentation calls."""
-        from ..state.graph import node_record
         if packet.get('schema') != 'wmmllm.pending.v1':
             raise IntegrityError('Unknown pending transaction schema')
         binding = packet['binding']
-        packet_hash = hashlib.sha256(canonical_json({k:v for k,v in packet.items() if k != 'packet_sha256'})).hexdigest()
+        packet_hash = canonical_sha256({k:v for k,v in packet.items() if k != 'packet_sha256'})
         if packet_hash != packet.get('packet_sha256'):
             raise IntegrityError('Pending packet checksum mismatch')
         if binding.get('session_id') != self.record['session_id'] or binding.get('method') != 'wmmllm.core.v1':
@@ -374,7 +357,6 @@ class SessionRunner:
                     semantic['semantic_accepted'] is not (semantic['status']=='PASS') or
                     semantic['uncertain_accepted_and_labeled'] is not (semantic['status']=='UNCERTAIN')):
                 raise IntegrityError('Pending accepted endpoint/semantic binding differs')
-        from .io import verify_references
         # The whole packet contains only existing assets and explicit nulls for
         # the not-yet-created memory snapshot. Even a settled replay verifies it.
         verify_references(packet, run_root=self.run_root)
@@ -412,7 +394,7 @@ class SessionRunner:
             memory_ref = self.store.snapshot_to(self.run_root / 'memory' / 'snapshots' / (nid + '.json'))
             spec = deepcopy(packet['node'])
             spec['memory_snapshot'] = memory_ref
-            node = node_record(run_root=self.run_root, **spec)
+            node = node_record(**spec)
             self.graph.add_node(node)
             self.record['nodes'].append(node)
             self.record['current_node_id'] = nid
@@ -425,9 +407,9 @@ class SessionRunner:
         return deepcopy(transition)
 
     def settle(self, packet: dict) -> dict:
-        packet['packet_sha256'] = hashlib.sha256(canonical_json(packet)).hexdigest()
+        packet['packet_sha256'] = canonical_sha256(packet)
         path = self.run_root / 'pending' / (packet['transition']['transition_id'] + '.json')
-        save_pending(path, packet, run_root=self.run_root)
+        write_once(path, dict(packet), run_root=self.run_root)
         return self._recover_packet(packet, path)
 
     def session_record(self) -> dict:

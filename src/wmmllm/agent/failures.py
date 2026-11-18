@@ -11,8 +11,7 @@ _TRANSPORT_CLASSES = frozenset((
 _CONFIG_CLASSES = frozenset((
     'BadRequestError', 'APIStatusError', 'AuthenticationError', 'PermissionDeniedError',
     'NotFoundError', 'ConflictError', 'UnprocessableEntityError', 'RouteMismatch',
-    'LocalCallError', 'JournalMismatch', 'InfrastructureHoldRejected',
-    'TokenLimitError', 'MalformedResponse', 'SchemaError', 'JSONDecodeError',
+    'LocalCallError', 'TokenLimitError', 'MalformedResponse', 'JSONDecodeError',
 ))
 
 _TECHNICAL_IMAGE_CLASSES = frozenset((
@@ -107,15 +106,7 @@ def provider_technical_failure(value):
 
 _HTTP = re.compile(r'(?:HTTP(?:\s+status)?|Error\s+code|status(?:_code)?)\s*[:=]?\s*[\"\']?([45]\d\d)\b', re.I)
 
-_CONFIG = re.compile(
-    r'(?:AE\s+(?:ultra|max)\s+configuration\s+(?:was\s+)?rejected'
-    r'|Invalid\s+value\s*:\s*[\"\']?(?:ultra|max)\b'
-    r'|(?:reasoning[._ ]?effort|reasoning\.effort).*(?:invalid|unsupported|rejected|must\s+send)'
-    r'|AE\s+chat\s+client\s+must\s+send'
-    r'|AE\s+chat\s+result\s+has\s+no\s+(?:ultra|max)\s+request\s+evidence'
-    r'|prohibited\s+model\s+route'
-    r'|(?:ultra|max)\s+gateway\s+acceptance\s+is\s+required'
-    r'|Persisted\s+(?:ultra|max)\s+rejection)', re.I | re.S)
+_CONFIG = re.compile(r'(?:reasoning[._ ]?effort|reasoning\.effort).*(?:invalid|unsupported|rejected|must\s+send)', re.I | re.S)
 
 def exception_record(error):
     """Keep status and nested causes that a generic stage error would otherwise hide."""
@@ -134,10 +125,9 @@ def exception_record(error):
             value = getattr(current, name, None)
             if isinstance(value, (dict, list)):
                 result[name] = value
-        for name in ('hold_contract', 'attempts'):
-            value = getattr(current, name, None)
-            if isinstance(value, (dict, list)):
-                result[name] = value
+        attempts = getattr(current, 'attempts', None)
+        if isinstance(attempts, (dict, list)):
+            result['attempts'] = attempts
         causes = [record(getattr(current, name, None)) for name in
                   ('__cause__', '__context__', 'original_error')]
         if any(causes):
@@ -193,10 +183,7 @@ def classify_failure(error_type, error, error_dict=None):
     blocked = infrastructure_failure({'record': record, 'error_type': name, 'error': text})
     if blocked:
         return {'classification': blocked['classification'], 'hold_eligible': False, 'bootstrap_hold': False}
-    kind = None
-    if name.rsplit('.', 1)[-1] == 'IdentityFirstProposalRejected':
-        kind = 'unclassified'
-    elif record.get('failure_kind') == 'transport' or name in ('TransportExhausted', 'TimeoutError', 'ConnectionError'):
+    if record.get('failure_kind') == 'transport' or name in ('TransportExhausted', 'TimeoutError', 'ConnectionError'):
         kind = 'transport'
     elif name.rsplit('.', 1)[-1] == 'RegistrationFailure' or text in ('source registration fails v5 distributed support/orientation gates', 'registered context fails v5 support/orientation/complete coverage gates'):
         kind = 'bootstrap_registration'
@@ -218,7 +205,7 @@ def classify_failure(error_type, error, error_dict=None):
         kind = 'generated_support_rejected'
     elif text == 'empty actual permitted support':
         kind = 'planner_noop_missing_premise'
-    elif text in ('Current editor source differs from the failed proposal transition', 'planner scope_bbox must be a nonempty normalized rectangle', 'No unique metadata binding for unresolved subject'):
+    elif text in ('planner scope_bbox must be a nonempty normalized rectangle', 'No unique metadata binding for unresolved subject'):
         kind = 'technical_schema_or_source'
     else:
         kind = 'unclassified'

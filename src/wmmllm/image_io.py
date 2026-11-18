@@ -85,10 +85,3 @@ def encode_rgb_png(image: Image.Image) -> tuple[bytes, dict[str, Any]]:
             raise ValueError("Image PNG round trip changed pixels or retained metadata")
     return encoded, record
 
-
-def save_rgb_png(image: Image.Image, path: str | Path) -> dict[str, Any]:
-    """Write a new metadata-free PNG; never overwrite an existing file."""
-    encoded, record = encode_rgb_png(image)
-    with Path(path).open("xb") as handle:
-        handle.write(encoded)
-    return record

@@ -1,6 +1,7 @@
 """Synthetic CPU checks; no downloaded models, benchmark media or network."""
 from __future__ import annotations
 import contextlib
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -12,10 +13,9 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-from reproduce.compbench import RowInputs, compose_pixels, locality_commit, necessary_support, select_row
-from reproduce.compbench.__main__ import main as compose_main
+from eval.compbench import compose, run_eval
+from eval.compbench.compose import compose_pixels, load_row, locality_commit, main as compose_main, necessary_support
 from eval.compbench.aggregate import ARMS, TAG, METRICS, aggregate_tables, load_archive, read_table
-from eval.compbench.run_eval import verify_evaluator
 
 
 def synthetic_tables():
@@ -29,25 +29,20 @@ class CompositionTests(unittest.TestCase):
         source = np.zeros((96, 96, 3), dtype=np.uint8)
         for direct in (source.copy(), np.full_like(source, 25)):
             support, _, alpha, final = compose_pixels(source, direct)
-            self.assertFalse(support.any())
-            self.assertFalse(alpha.any())
+            self.assertFalse(support.any()); self.assertFalse(alpha.any())
             np.testing.assert_array_equal(source, final)
+        for direct in (np.zeros((96, 96, 3)), np.zeros((95, 96, 3), np.uint8)):
+            with self.assertRaises(ValueError):
+                compose_pixels(source if direct.dtype == np.uint8 else source.astype(float), direct)
 
-    def test_thin_connected_edit_survives_noise_floor(self):
-        diff = np.zeros((120, 120), dtype=np.float32)
-        diff[60, 20:100] = 26
-        diff[5:7, 5:7] = 100
-        support, _ = necessary_support(diff)
-        self.assertEqual(int(support.sum()), 80)
-        self.assertTrue(support[60, 20:100].all())
-
-    def test_component_floor_is_individual_and_inclusive(self):
-        diff = np.zeros((120, 120), dtype=np.float32)
-        diff[10:18, 10:18] = 26
-        diff[40:47, 40:49] = 26
-        support, _ = necessary_support(diff)
-        self.assertEqual(int(support.sum()), 64)
-        self.assertTrue(support[10:18, 10:18].all())
+    def test_thin_edits_survive_and_component_floor_is_individual_and_inclusive(self):
+        for strokes, expected in ((((60, slice(20, 100)), (slice(5, 7), slice(5, 7))), 80),
+                                  (((slice(10, 18), slice(10, 18)), (slice(40, 47), slice(40, 49))), 64)):
+            diff = np.zeros((120, 120), dtype=np.float32)
+            diff[strokes[0]] = 26
+            diff[strokes[1]] = 100 if expected == 80 else 26
+            support, _ = necessary_support(diff)
+            self.assertEqual(int(support.sum()), expected); self.assertTrue(support[strokes[0]].all())
 
     def test_dilation_feather_and_exact_zero_alpha(self):
         source = np.full((128, 128, 3), 17, dtype=np.uint8)
@@ -67,49 +62,18 @@ class CompositionTests(unittest.TestCase):
         actual = locality_commit(source, direct, alpha)
         np.testing.assert_array_equal(actual, np.array([[[128, 15, 127], [0, 10, 255]]], dtype=np.uint8))
 
-    def test_input_types_are_explicit(self):
-        with self.assertRaises(ValueError):
-            compose_pixels(np.zeros((2, 2, 3)), np.zeros((2, 2, 3)))
-        with self.assertRaises(ValueError):
-            compose_pixels(np.zeros((2, 2, 3), np.uint8), np.zeros((3, 2, 3), np.uint8))
-
-    def make_row(self, root, direct, **extras):
+    def make_row(self, root, direct):
         Image.fromarray(np.zeros_like(direct)).save(root / 'source.png')
         Image.fromarray(direct).save(root / 'proposal.png')
-        return RowInputs({'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png', **extras}, input_root=root)
+        manifest = root / 'inputs.json'
+        manifest.write_text(json.dumps([{'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png'}]))
+        return manifest
 
-    def test_full_frame_is_labeled_without_vacuous_guarantee(self):
-        with tempfile.TemporaryDirectory() as directory:
-            row = self.make_row(Path(directory), np.full((96, 96, 3), 255, np.uint8))
-            receipt, _, _, _ = select_row(row)
-            self.assertEqual(receipt['scope'], 'out_of_scope_global_edit')
-            self.assertFalse(receipt['ships_with_guarantee'])
-            self.assertFalse(receipt['counted_in_guarantee_headline'])
-
-    def test_out_of_scope_can_retain_nonempty_guarantee(self):
-        with tempfile.TemporaryDirectory() as directory:
-            direct = np.zeros((128, 640, 3), np.uint8)
-            direct[:, :366] = 255
-            row = self.make_row(Path(directory), direct)
-            receipt, _, _, _ = select_row(row)
-            self.assertEqual(receipt['scope'], 'out_of_scope_global_edit')
-            self.assertTrue(receipt['ships_with_guarantee'])
-            self.assertFalse(receipt['counted_in_guarantee_headline'])
-
-    def test_diagnostic_masks_never_change_installed_pixels(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            direct = np.zeros((128, 128, 3), np.uint8)
-            direct[50:75, 50:75] = 255
-            plain = self.make_row(root, direct)
-            Image.fromarray(np.full((128, 128), 255, np.uint8)).save(root / 'diagnostic.png')
-            diagnostic = RowInputs({'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png',
-                                    'protected': 'diagnostic.png', 'base_target': 'diagnostic.png',
-                                    'declared_box': 'diagnostic.png'}, input_root=root)
-            _, alpha_a, final_a, support_a = select_row(plain)
-            _, alpha_b, final_b, support_b = select_row(diagnostic)
-            for a, b in [(alpha_a, alpha_b), (final_a, final_b), (support_a, support_b)]:
-                np.testing.assert_array_equal(a, b)
+    def compose(self, root, direct):
+        manifest = self.make_row(root, direct)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(compose_main(['--inputs', str(manifest), '--input-root', str(root), '--out', str(root / 'out')]), 0)
+        return json.loads((root / 'out/RUN_MANIFEST.json').read_text())
 
     def test_loader_rejects_targets_and_escaping_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -117,39 +81,55 @@ class CompositionTests(unittest.TestCase):
             for ref, error in [('edited_image/a.png', PermissionError), ('../source.png', ValueError),
                                ('/source.png', ValueError)]:
                 with self.assertRaises(error):
-                    RowInputs({'row_id': 'sample', 'source': ref, 'direct': 'x.png'}, input_root=root)
+                    load_row({'row_id': 'sample', 'source': ref, 'direct': 'x.png'}, input_root=root)
+
+    def test_loader_resizes_proposal_with_lanczos_to_source_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            Image.fromarray(np.zeros((16, 24, 3), np.uint8)).save(root / 'source.png')
+            proposal = Image.fromarray(np.arange(32 * 48 * 3, dtype=np.uint8).reshape(32, 48, 3))
+            proposal.save(root / 'proposal.png')
+            _, source, direct = load_row({'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png'}, input_root=root)
+            expected = np.asarray(proposal.resize((24, 16), Image.Resampling.LANCZOS))
+            self.assertEqual(source.shape, (16, 24, 3))
+            np.testing.assert_array_equal(direct, expected)
+
+    def test_scope_labels_global_edits_without_changing_pixels(self):
+        for width, out_of_scope in ((96, True), (20, False)):
+            with tempfile.TemporaryDirectory() as directory:
+                direct = np.zeros((96, 96, 3), np.uint8)
+                direct[:, :width] = 255
+                manifest = self.compose(Path(directory), direct)
+                self.assertEqual(manifest['out_of_scope_rows'] == ['sample'], out_of_scope)
 
     def test_cli_writes_verified_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             direct = np.zeros((96, 96, 3), np.uint8)
             direct[35:55, 35:55] = 255
-            self.make_row(root, direct)
-            manifest = root / 'inputs.json'
-            manifest.write_text(json.dumps([{'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png'}]))
-            out = root / 'out'
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(compose_main(['--inputs', str(manifest), '--input-root', str(root), '--out', str(out)]), 0)
-            receipt = json.loads((out / 'receipts/sample.json').read_text())
-            self.assertGreater(receipt['guarantee_px_checked'], 0)
-            self.assertEqual(receipt['guarantee_px_checked'], receipt['guarantee_px_identical'])
-            self.assertEqual(receipt['source_path'], 'source.png')
-            self.assertTrue((out / 'RUN_MANIFEST.json').is_file())
+            manifest = self.compose(root, direct)
+            self.assertGreater(manifest['guarantee_px_checked'], 0)
+            self.assertEqual(manifest['guarantee_px_checked'], manifest['guarantee_px_identical'])
+            item = manifest['items'][0]
+            self.assertEqual(item['final'], 'final/sample.png')
+            support, _, alpha, final = compose_pixels(np.zeros_like(direct), direct)
+            np.testing.assert_array_equal(np.asarray(Image.open(root / 'out/final/sample.png')), final)
+            np.testing.assert_array_equal(np.asarray(Image.open(root / 'out/alpha/sample.png')), alpha)
+            np.testing.assert_array_equal(np.asarray(Image.open(root / 'out/support/sample.png')) > 0, support)
 
     def test_cli_detects_source_change_before_publication(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.make_row(root, np.full((96, 96, 3), 255, np.uint8))
-            manifest = root / 'inputs.json'
-            manifest.write_text(json.dumps([{'row_id': 'sample', 'source': 'source.png', 'direct': 'proposal.png'}]))
+            manifest = self.make_row(root, np.full((96, 96, 3), 255, np.uint8))
+            original = compose.compose_pixels
 
-            def change_source(row):
-                result = select_row(row)
+            def change_source(*args):
+                result = original(*args)
                 Image.fromarray(np.full((96, 96, 3), 77, np.uint8)).save(root / 'source.png')
                 return result
 
             out = root / 'out'
-            with patch('reproduce.compbench.__main__.select_row', side_effect=change_source):
+            with patch.object(compose, 'compose_pixels', side_effect=change_source):
                 with self.assertRaises(RuntimeError):
                     compose_main(['--inputs', str(manifest), '--input-root', str(root), '--out', str(out)])
             self.assertFalse((out / 'RUN_MANIFEST.json').exists())
@@ -163,8 +143,7 @@ class AggregationTests(unittest.TestCase):
                 tables[(arm, subtask)] = {str(i): {m: value for m in METRICS} for i in range(count)}
         out = aggregate_tables(tables)
         expected = float(round(np.mean([np.float64(1.235), np.float64(3.457), np.float64(8.766)]), 3))
-        self.assertEqual(out['groups']['Local']['ours']['LC-I'], expected)
-        self.assertEqual(out['n']['add'], 20)
+        self.assertEqual(out['groups']['Local']['ours']['LC-I'], expected); self.assertEqual(out['n']['add'], 20)
 
     def test_psnr_joins_names_and_intersects_finite_rows(self):
         tables = synthetic_tables()
@@ -188,8 +167,7 @@ class AggregationTests(unittest.TestCase):
     def test_csv_coercion_and_duplicates(self):
         text = 'Image_Name,LC-T,LC-I,PSNR,SSIM,LPIPS\na.png,bad,,inf,0.9,0.01\n'
         table = read_table(text)
-        self.assertTrue(np.isnan(table['a.png']['LC-T']))
-        self.assertTrue(np.isnan(table['a.png']['LC-I']))
+        self.assertTrue(np.isnan(table['a.png']['LC-T'])); self.assertTrue(np.isnan(table['a.png']['LC-I']))
         self.assertTrue(np.isinf(table['a.png']['PSNR']))
         with self.assertRaises(ValueError):
             read_table(text + 'a.png,1,1,1,1,1\n')
@@ -221,13 +199,12 @@ class AggregationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 aggregate_tables(tables)
 
-    def test_bundled_evaluator_matches_approved_portable_hash(self):
-        from eval.compbench.run_eval import PORTABLE_EVALUATOR
-        self.assertEqual(len(verify_evaluator(PORTABLE_EVALUATOR)), 64)
-
-    def test_wrong_evaluator_is_rejected_before_model_import(self):
+    def test_only_the_pinned_evaluator_is_accepted_before_model_import(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'eval_all.py'
             path.write_text('raise RuntimeError("must not execute")\n')
             with self.assertRaises(ValueError):
-                verify_evaluator(path)
+                run_eval.verify_evaluator(path)
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            with patch.object(run_eval, 'EVALUATOR_SHA256', digest):
+                self.assertEqual(run_eval.verify_evaluator(path), digest)

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import time
-from .common import PACKAGE, FAMILIES, atomic, file_ref, sha256, now, digest
+from .common import PACKAGE, FAMILIES, file_ref, sha256
 
 def video_metadata(path):
     import cv2
@@ -29,7 +29,7 @@ def video_metadata(path):
 class Runtime:
     def __init__(self, family, device, work_dir, lock):
         import torch
-        from .._upstream.metrics import environment_consistency as env
+        from mbench.metrics import environment_consistency as env
 
         self.family = family
         self.device = device
@@ -68,7 +68,7 @@ class Runtime:
         import hashlib
         import numpy as np
         from depth_anything_3.api import DepthAnything3
-        from eval.mbench._upstream.metrics.video_io import sample_bgr_frames
+        from mbench.metrics.video_io import sample_bgr_frames
 
         verify_da3_source(self.lock)
 
@@ -130,8 +130,8 @@ class Runtime:
         return dest / "results.npz", product
 
     def evaluate_metric(self, metric, item):
-        from eval.mbench._upstream.core.pipeline import _project_unit_scores, _project_item_scores
-        from eval.mbench._upstream.aggregators.mean import MeanAggregator
+        from mbench.core.pipeline import _project_unit_scores, _project_item_scores
+        from mbench.aggregators.mean import MeanAggregator
         kwargs = {"device": self.device, "ignore_trigger": True}
         units = metric.evaluate(item, **kwargs)
         # Official order: aggregate native raw unit signals before projecting.

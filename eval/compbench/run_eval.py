@@ -8,14 +8,13 @@ import json
 from pathlib import Path
 import sys
 
+# eval_all.py at github.com/comp-bench/CompBench commit cb9165b01d14a321db14611afd9922c43a04665d
 EVALUATOR_SHA256 = '04f622a30231c8165188dafb33050233ceb7756c69fb0454f11842373dea0e5e'
-PORTABLE_EVALUATOR = Path(__file__).parent / 'upstream/eval_all.py'
 
 
 def verify_evaluator(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    lock = json.loads((Path(__file__).parent / 'EVALUATOR_LOCK.json').read_text())
-    if digest not in {EVALUATOR_SHA256, lock['portable_sha256']}:
+    if digest != EVALUATOR_SHA256:
         raise ValueError('upstream eval_all.py does not match the pinned SHA-256')
     return digest
 
@@ -24,7 +23,7 @@ def run(args):
     evaluator_path = args.evaluator.resolve(strict=True)
     verify_evaluator(evaluator_path)
     if getattr(args, 'check_inputs', False):
-        from .prepare_results import check_inputs
+        from .export import check_inputs
         if args.index is None:
             raise ValueError('--check-inputs requires the prepared --index')
         print(json.dumps(check_inputs(args.index, args.data_root, args.results_root, args.model, args.tasks), indent=2))
@@ -97,8 +96,8 @@ def run(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('model')
-    parser.add_argument('--evaluator', type=Path, default=PORTABLE_EVALUATOR,
-                        help='defaults to the bundled portable upstream evaluator')
+    parser.add_argument('--evaluator', type=Path, required=True,
+                        help='eval_all.py from a CompBench checkout at the pinned commit')
     parser.add_argument('--clip-path', type=Path)
     parser.add_argument('--check-inputs', action='store_true',
                         help='verify indexed dataset/result paths and exit without metric inference')

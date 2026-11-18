@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol, runtime_checkable
+from typing import Any, Literal, Mapping, Protocol
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,6 @@ class ChatRequest:
 @dataclass(frozen=True)
 class ChatResponse:
     text: str = field(repr=False)
-    finish_reason: str
     model: str | None
     receipt: CallReceipt
 
@@ -109,17 +108,9 @@ class ImageEditRequest:
 @dataclass(frozen=True)
 class ImageEditResult:
     image: Path = field(repr=False)
-    raw_size: tuple[int, int]
-    returned_quality: str
-    resize: Literal["none", "uniform_lanczos"]
     receipt: CallReceipt
 
-    @property
-    def usage(self) -> Usage | None:
-        return self.receipt.usage
 
-
-@runtime_checkable
 class ChatClient(Protocol):
     route: str
 
@@ -128,7 +119,6 @@ class ChatClient(Protocol):
     def close(self) -> None: ...
 
 
-@runtime_checkable
 class ImageEditClient(Protocol):
     route: str
 
@@ -155,6 +145,5 @@ class PresentationResult:
     reason: str | None = None
 
 
-@runtime_checkable
 class VideoBackend(Protocol):
     def present(self, transition: VideoTransition) -> PresentationResult: ...

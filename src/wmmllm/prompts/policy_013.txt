@@ -1,1 +1,0 @@
-Explicit multiple shots need an ordered cut schedule; timing is an implementation choice.

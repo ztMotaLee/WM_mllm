@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "An agentic interactive world model with persistent panorama state"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",
@@ -21,33 +21,25 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://ztmotalee.github.io/wmmllm/"
+Homepage = "https://baiangli.com/wmmllm/"
 Repository = "https://github.com/ztMotaLee/WM_mllm"
 Issues = "https://github.com/ztMotaLee/WM_mllm/issues"
 
 [project.optional-dependencies]
-eval = ["torch>=2.2", "transformers>=4.40", "torchmetrics==1.4.3", "pandas>=2", "lpips>=0.1.4", "tqdm>=4.66"]
-dev = ["pytest>=8", "jsonschema>=4", "ruff>=0.9", "build>=1.2"]
-geometry = ["numba>=0.59"]
+dev = ["pytest>=8"]
 
 [project.scripts]
 wmmllm = "wmmllm.cli:main"
 
 [tool.setuptools]
 include-package-data = false
-packages = ["eval", "eval.camera", "eval.compbench", "eval.compbench.upstream", "eval.mbench", "eval.mbench._upstream", "eval.mbench._upstream.aggregators", "eval.mbench._upstream.core", "eval.mbench._upstream.metrics", "eval.mbench.mem6_scorer", "reproduce", "reproduce.compbench", "wmmllm", "wmmllm.agent", "wmmllm.defaults", "wmmllm.memory", "wmmllm.prompts", "wmmllm.providers", "wmmllm.session", "wmmllm.state", "wmmllm.video", "wmmllm.viewer", "wmmllm_datasets"]
-package-dir = {"wmmllm" = "src/wmmllm", "eval" = "eval", "reproduce" = "reproduce", "wmmllm_datasets" = "scripts/datasets", "wmmllm.viewer" = "viewer", "wmmllm.defaults" = "configs"}
+packages = ["wmmllm", "wmmllm.agent", "wmmllm.memory", "wmmllm.prompts", "wmmllm.providers", "wmmllm.session", "wmmllm.state", "wmmllm.video"]
+package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-"wmmllm.prompts" = ["*.txt", "*.json", "**/*.txt", "**/*.json"]
-"wmmllm.viewer" = ["index.html", "README.md", "assets/*.js", "assets/*.css", "assets/*.svg", "schema/*.json", "worlds/procedural/*.json", "worlds/procedural/media/*.png", "worlds/procedural/media/*.mp4"]
-"wmmllm.defaults" = ["*.yaml"]
-"wmmllm_datasets" = ["*.json", "*.sha256", "README.md"]
-"eval.mbench" = ["*.json", "*.txt", "*.md", "LICENSE.upstream"]
-"eval.compbench" = ["*.json", "*.txt", "*.md", "LICENSE.upstream"]
-"eval.camera" = ["*.txt", "*.md"]
-"reproduce.compbench" = ["*.md"]
+"wmmllm.prompts" = ["*.txt", "*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 addopts = "-p no:cacheprovider"

@@ -1,1 +1,0 @@
- Image 2 is the requested initial viewpoint and identity reference; preserve current physical states from Image 1.

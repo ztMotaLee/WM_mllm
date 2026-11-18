@@ -25,7 +25,7 @@ class ConfigError(ValueError):
 class ChatConfig:
     api_key: str = field(repr=False)
     model: str
-    base_url: str = field(default="https://api.openai.com/v1", repr=False)
+    base_url: str = field(default="", repr=False)
     organization: str | None = field(default=None, repr=False)
     project: str | None = field(default=None, repr=False)
     transport: str = "chat_completions"
@@ -35,8 +35,8 @@ class ChatConfig:
 
     def __post_init__(self) -> None:
         _validate_endpoint(self, "chat")
-        if self.transport not in ("chat_completions", "responses_stream"):
-            raise ConfigError("chat.transport must be chat_completions or responses_stream.")
+        if self.transport != "chat_completions":
+            raise ConfigError("chat.transport must be chat_completions; responses_stream is no longer supported.")
         if self.reasoning_effort not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
             raise ConfigError("Unsupported chat.reasoning_effort; select an explicit supported setting.")
         _integer(self.max_output_tokens, "chat.max_output_tokens")
@@ -50,7 +50,7 @@ class ChatConfig:
 class ImageConfig:
     api_key: str = field(repr=False)
     model: str
-    base_url: str = field(default="https://api.openai.com/v1", repr=False)
+    base_url: str = field(default="", repr=False)
     organization: str | None = field(default=None, repr=False)
     project: str | None = field(default=None, repr=False)
     quality: str = "high"
@@ -119,8 +119,6 @@ class BudgetConfig:
             _number(self.max_cost_usd, "budget.max_cost_usd", positive=False)
         if any(role not in ("chat", "image") for role in self.prices):
             raise ConfigError("Budget prices must use chat and image entries.")
-        if any(not isinstance(price, PriceConfig) for price in self.prices.values()):
-            raise ConfigError("Budget prices must contain PriceConfig values.")
         if self.max_cost_usd is not None and set(self.prices) != {"chat", "image"}:
             raise ConfigError("budget.max_cost_usd requires user prices and per-attempt upper bounds for chat and image; no request was sent.")
         object.__setattr__(self, "prices", MappingProxyType(dict(self.prices)))
@@ -183,6 +181,11 @@ class AppConfig:
     def __repr__(self) -> str:
         return f"AppConfig({self.safe_dict()!r})"
 
+    def secrets(self) -> tuple[str, ...]:
+        """Configured credentials and endpoint identities, for redaction only."""
+        return tuple(value for settings in (self.chat, self.image)
+                     for value in (settings.api_key, settings.base_url, settings.organization, settings.project) if value)
+
 
 _PRICE_FIELDS = frozenset({"upper_bound_usd", "input_usd_per_million", "output_usd_per_million", "cached_input_usd_per_million",
                           "text_input_usd_per_million", "image_input_usd_per_million", "image_output_usd_per_million"})
@@ -218,16 +221,23 @@ def _size(value: Any, name: str) -> tuple[int, int]:
 
 
 
+_MISSING_KEY = {"chat": "Missing WMM_LLM_API_KEY for chat provider; set the process environment or an explicitly selected env file; no request was sent.",
+                "image": "Missing WMM_IMAGE_API_KEY for image provider; no request was sent."}
+
+
 def _validate_endpoint(config: ChatConfig | ImageConfig, role: str) -> None:
-    prefix = "WMM_LLM" if role == "chat" else "WMM_IMAGE"
-    for field_name, suffix in (("api_key", "API_KEY"), ("model", "MODEL")):
-        value = getattr(config, field_name)
-        if not isinstance(value, str) or not value.strip():
-            raise ConfigError(f"Missing {prefix}_{suffix}; configure the {role} provider; no request was sent.")
+    if not isinstance(config.api_key, str) or not config.api_key.strip():
+        raise ConfigError(_MISSING_KEY[role])
+    if not isinstance(config.model, str) or not config.model.strip():
+        prefix = "WMM_LLM" if role == "chat" else "WMM_IMAGE"
+        raise ConfigError(f"Missing {prefix}_MODEL; choose a model supported by your endpoint; no request was sent.")
+    if not isinstance(config.base_url, str) or not config.base_url.strip():
+        prefix = "WMM_LLM" if role == "chat" else "WMM_IMAGE"
+        raise ConfigError(f"Missing {prefix}_BASE_URL; set the base URL of your own provider endpoint; no request was sent.")
     for name in ("api_key", "base_url", "model", "organization", "project"):
         value = getattr(config, name)
         if value is not None and (not isinstance(value, str) or "\n" in value or "\r" in value):
-            raise ConfigError("Endpoint settings must be strings without line breaks.")
+            raise ConfigError("Endpoint settings must not contain line breaks.")
     if not re.match(r"^https?://", config.base_url, re.IGNORECASE):
         raise ConfigError("Provider base_url must use HTTP or HTTPS.")
 
@@ -280,27 +290,9 @@ def _override_mapping(overrides: Mapping[str, Any] | None) -> dict[str, Any]:
         return {}
     if not isinstance(overrides, Mapping):
         raise ConfigError("CLI overrides must be a mapping.")
-    result: dict[str, Any] = {}
-    for key, value in overrides.items():
-        if not isinstance(key, str):
-            raise ConfigError("CLI override names must be strings.")
-        if "." in key:
-            parts = key.split(".")
-            if len(parts) != 2:
-                raise ConfigError("CLI overrides must use section.field names.")
-            section, field_name = parts
-            incoming = {field_name: value}
-        elif isinstance(value, Mapping):
-            section, incoming = key, dict(value)
-        else:
-            if key in result:
-                raise ConfigError("CLI override fields must be unambiguous.")
-            result[key] = value
-            continue
-        block = result.setdefault(section, {})
-        if not isinstance(block, dict) or set(incoming) & set(block):
-            raise ConfigError("CLI override fields must be unambiguous.")
-        block.update(incoming)
+    if any(not isinstance(key, str) for key in overrides):
+        raise ConfigError("CLI override names must be strings.")
+    result = {key: dict(value) if isinstance(value, Mapping) else value for key, value in overrides.items()}
     _validate_mapping(result)
     return result
 
@@ -374,28 +366,14 @@ def load_config(config_path: str | os.PathLike[str] | None = None, *,
         value = blocks["chat"].get(field_name)
         if value is not None and not isinstance(value, str):
             raise ConfigError("Chat endpoint settings must be strings.")
-        blocks["chat"][field_name] = (value or "").strip() or ("https://api.openai.com/v1" if field_name == "base_url" else None)
+        blocks["chat"][field_name] = (value or "").strip() or ("" if field_name == "base_url" else None)
         value = blocks["image"].get(field_name)
         if value is not None and not isinstance(value, str):
             raise ConfigError("Image endpoint settings must be strings.")
         blocks["image"][field_name] = (value or "").strip() or blocks["chat"][field_name]
     chat_key = values["WMM_LLM_API_KEY"]
-    image_key = values["WMM_IMAGE_API_KEY"] or chat_key
-    if not chat_key:
-        raise ConfigError("Missing WMM_LLM_API_KEY for chat provider; set the process environment or an explicitly selected env file; no request was sent.")
-    if not image_key:
-        raise ConfigError("Missing WMM_IMAGE_API_KEY for image provider; no request was sent.")
-    for name, variable in (("chat", "WMM_LLM_MODEL"), ("image", "WMM_IMAGE_MODEL")):
-        if not blocks[name]["model"]:
-            raise ConfigError(f"Missing {variable}; choose a model supported by your endpoint; no request was sent.")
-        for field_name in ("base_url", "model", "organization", "project"):
-            value = blocks[name][field_name]
-            if value and ("\n" in value or "\r" in value):
-                raise ConfigError("Endpoint settings must not contain line breaks.")
-        if not re.match(r"^https?://", blocks[name]["base_url"], re.IGNORECASE):
-            raise ConfigError("Provider base_url must use HTTP or HTTPS.")
     c = ChatConfig(api_key=chat_key, **blocks["chat"])
-    i = ImageConfig(api_key=image_key, **blocks["image"])
+    i = ImageConfig(api_key=values["WMM_IMAGE_API_KEY"] or chat_key, **blocks["image"])
     t = RetryConfig(**blocks["transport"])
     b = blocks["budget"]
     prices = b.get("prices", {})
@@ -413,8 +391,4 @@ def load_config(config_path: str | os.PathLike[str] | None = None, *,
             raise ConfigError("Each chat/image price requires upper_bound_usd and optional token rates.")
         parsed_prices[role] = PriceConfig(**price)
     budget = BudgetConfig(max_cost_usd=b.get("max_cost_usd"), prices=parsed_prices)
-    v = dict(blocks["video"])
-    if "size" in v:
-        v["size"] = _size(v["size"], "video.size")
-    video = VideoConfig(**v)
-    return AppConfig(chat=c, image=i, transport=t, budget=budget, video=video)
+    return AppConfig(chat=c, image=i, transport=t, budget=budget, video=VideoConfig(**blocks["video"]))

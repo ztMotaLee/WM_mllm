@@ -1,1 +1,0 @@
-"""Shipped nonsecret configuration defaults."""

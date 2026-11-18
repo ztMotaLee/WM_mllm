@@ -72,12 +72,26 @@ def atomic(path, value):
             os.unlink(tmp)
 
 
+def upstream_root():
+    """Directory holding the importable upstream ``mbench`` package (a checkout on PYTHONPATH)."""
+    import importlib.util
+    spec = importlib.util.find_spec("mbench")
+    if spec is None or spec.origin is None:
+        raise RuntimeError("MBench is not importable; clone study-overflow/MBench at "
+                           + UPSTREAM_COMMIT + " and add the checkout to PYTHONPATH")
+    return Path(spec.origin).resolve().parents[1]
+
+
 def verify_code():
     lock = json.loads((PACKAGE / "CODE_LOCK.json").read_text())
-    for relative, expected in lock["files"].items():
-        path = PACKAGE / relative
-        if sha256(path) != expected:
-            raise RuntimeError("Scorer code changed: " + str(path))
+    if digest({"files": lock["files"], "upstream_files": lock["upstream_files"]}) != lock["tree_sha256"]:
+        raise RuntimeError("Scorer code lock is inconsistent")
+    upstream = upstream_root()
+    for root, files in ((PACKAGE, lock["files"]), (upstream, lock["upstream_files"])):
+        for relative, expected in files.items():
+            path = root / relative
+            if not path.is_file() or sha256(path) != expected:
+                raise RuntimeError("Scorer code differs from the lock: " + str(path))
     return {"lock": file_ref(PACKAGE / "CODE_LOCK.json"), "tree_sha256": lock["tree_sha256"],
             "upstream_commit": lock["upstream_commit"]}
 
@@ -120,25 +134,6 @@ def read_manifest(path):
                            "manifest_index": index,
                            "condition_id": row.get("condition_id") or row.get("condition")})
     return normalized
-
-
-def select_rows(rows, *, family, model=None, index=None, limit=None, shard_index=0, shard_count=1):
-    if shard_count < 1 or shard_index < 0 or shard_index >= shard_count:
-        raise ValueError("Invalid shard selection")
-    selected = [row for row in rows if row["subset"] == family
-                and (model is None or row["model_id"] == model)]
-    # Index is relative to the requested family/model partition.
-    if index is not None:
-        if index < 0 or index >= len(selected):
-            raise ValueError("Index outside family/model partition")
-        selected = [selected[index]]
-    selected = [row for position, row in enumerate(selected)
-                if position % shard_count == shard_index]
-    if limit is not None:
-        if limit < 1:
-            raise ValueError("Limit must be positive")
-        selected = selected[:limit]
-    return selected
 
 
 def record_id(row):

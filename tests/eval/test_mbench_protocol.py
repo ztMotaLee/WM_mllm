@@ -8,18 +8,39 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 from eval.mbench import aggregation as table
-from eval.mbench._upstream.core.item import EvaluationItem
-from eval.mbench._upstream.core.result import UnitResult, ItemResult
-from eval.mbench._upstream.core.pipeline import _project_item_scores, _project_unit_scores
-from eval.mbench._upstream.aggregators.mean import MeanAggregator
-from eval.mbench._upstream.metrics.environment_consistency import SpatialEpipolarMetric, SpatialReprojectionMetric
-from eval.mbench._upstream.metrics.canonical import canonicalize_scores
-from eval.mbench.mem6_scorer.common import read_manifest, select_rows
+from eval.mbench.mem6_scorer.common import PACKAGE, digest, read_manifest, sha256, verify_code
 from eval.mbench.mem6_scorer.cli import _measured
 
 
-class MBenchProtocolTests(unittest.TestCase):
+def test_code_lock_binds_adapter_files():
+    lock = json.loads((PACKAGE / "CODE_LOCK.json").read_text())
+    assert lock["upstream_commit"] == "c44dbd9dfa0278be728bda2101b0fb96f8547f11"
+    assert digest({"files": lock["files"], "upstream_files": lock["upstream_files"]}) == lock["tree_sha256"]
+    assert {path: sha256(PACKAGE / path) for path in lock["files"]} == lock["files"]
+    adapters = {path.relative_to(PACKAGE).as_posix() for path in PACKAGE.rglob("*.py")}
+    assert set(lock["files"]) == adapters | {"PROTOCOL.json", "MODEL_LOCK.json"}
+
+
+class MBenchUpstreamTests(unittest.TestCase):
+    """Run against the pinned upstream checkout on PYTHONPATH; skipped when it is absent."""
+
+    def setUp(self):
+        pytest.importorskip("mbench")
+        global EvaluationItem, UnitResult, ItemResult, _project_item_scores, _project_unit_scores
+        global MeanAggregator, SpatialEpipolarMetric, SpatialReprojectionMetric, canonicalize_scores
+        from mbench.core.item import EvaluationItem
+        from mbench.core.result import UnitResult, ItemResult
+        from mbench.core.pipeline import _project_item_scores, _project_unit_scores
+        from mbench.aggregators.mean import MeanAggregator
+        from mbench.metrics.environment_consistency import SpatialEpipolarMetric, SpatialReprojectionMetric
+        from mbench.metrics.canonical import canonicalize_scores
+
+    def test_verify_code_checks_adapter_and_mbench_files(self):
+        self.assertEqual(verify_code()["upstream_commit"], "c44dbd9dfa0278be728bda2101b0fb96f8547f11")
+
     def test_raw_units_aggregate_before_exponential_projection(self):
         for metric, key, tau in ((SpatialEpipolarMetric(), "median_epi_dist", 5.),
                                  (SpatialReprojectionMetric(), "median_reproj", 12.)):
@@ -32,8 +53,7 @@ class MBenchProtocolTests(unittest.TestCase):
             self.assertEqual(result.scores["score_raw"], tau)
             self.assertEqual(result.scores["score"], math.exp(-1))
             self.assertNotAlmostEqual(result.scores["score"], (1 + math.exp(-2)) / 2)
-            self.assertEqual(result.num_units, 3)
-            self.assertTrue(result.valid)
+            self.assertEqual(result.num_units, 3); self.assertTrue(result.valid)
 
     def test_style_lighting_projection_and_invalid_flags(self):
         self.assertEqual(canonicalize_scores("mbencha.environment.rendering_style", {"gram_dist": .3, "dino_sim": .99}),
@@ -56,7 +76,9 @@ class MBenchProtocolTests(unittest.TestCase):
             self.assertFalse(_measured({"valid": True, "scores": {"score": value}}))
         self.assertFalse(_measured({"valid": False, "scores": {"score": .2}}))
 
-    def test_manifest_order_aliases_shards_and_duplicate_rejection(self):
+
+class MBenchProtocolTests(unittest.TestCase):
+    def test_manifest_order_aliases_and_duplicate_rejection(self):
         with tempfile.TemporaryDirectory(prefix="mbench_synthetic_") as directory:
             path = Path(directory) / "manifest.json"
             rows = [{"model": "procedural", "item_id": f"environment:synthetic{index}:condition",
@@ -65,17 +87,15 @@ class MBenchProtocolTests(unittest.TestCase):
             path.write_text(json.dumps({"rows": rows}))
             parsed = read_manifest(path)
             self.assertEqual(parsed[0]["expected_sha256"], "a" * 64)
-            self.assertEqual(select_rows(parsed, family="environment", index=3)[0]["item_id"], rows[3]["item_id"])
-            shards = [select_rows(parsed, family="environment", shard_index=i, shard_count=2) for i in range(2)]
-            self.assertEqual([[row["manifest_index"] for row in shard] for shard in shards], [[0, 2, 4], [1, 3]])
+            self.assertEqual([row["manifest_index"] for row in parsed], list(range(5)))
+            self.assertEqual({row["subset"] for row in parsed}, {"environment"})
             path.write_text(json.dumps(rows + [rows[0]]))
             with self.assertRaises(ValueError):
                 read_manifest(path)
 
     def test_runtime_module_import_is_lazy(self):
         runtime = importlib.import_module("eval.mbench.mem6_scorer.runtime")
-        self.assertTrue(callable(runtime.Runtime.for_pose))
-        self.assertTrue(callable(runtime.verify_weights))
+        self.assertTrue(callable(runtime.Runtime.for_pose)); self.assertTrue(callable(runtime.verify_weights))
 
 
     def test_weight_verification_uses_explicit_root_and_camera_subset(self):
@@ -123,15 +143,12 @@ class MBenchTableTests(unittest.TestCase):
         metric, expected, records = self.fixture()
         expected[("yume", "environment:synthetic2:condition", "condition")]["status"] = "MISSING_TEST_ONLY"
         common, present = table.populations(expected)
-        self.assertEqual(len(common), 2)
-        self.assertEqual(len(present["aiwm"]), 3)
+        self.assertEqual(len(common), 2); self.assertEqual(len(present["aiwm"]), 3)
         result = table.cell("aiwm", metric, present["aiwm"], expected, records, "own_full", iterations=17)
         self.assertEqual((result["valid_count"], result["invalid_count"], result["missing_count"]), (2, 1, 0))
-        self.assertEqual(result["mean"], .5)
-        self.assertEqual(result["mean_display100"], 50.)
+        self.assertEqual(result["mean"], .5); self.assertEqual(result["mean_display100"], 50.)
         self.assertEqual(result["bootstrap_95_ci"], [.25, .75])
-
-    def test_missing_receipt_does_not_shrink_population(self):
+        # A missing receipt does not shrink the population.
         metric, expected, records = self.fixture()
         del records[("aiwm", "environment:synthetic2:condition", "condition")]
         common, _ = table.populations(expected)
@@ -148,8 +165,7 @@ class MBenchTableTests(unittest.TestCase):
             result = table.cell("aiwm", metric, table.populations(expected)[0], expected, changed, "common", iterations=5)
             self.assertEqual(result["valid_count"], 1)
         self.assertEqual(table.bootstrap([.1, .2, .8], 101, 19), table.bootstrap([.1, .2, .8], 101, 19))
-        self.assertIsNone(table.bootstrap([], 7, 3))
-        self.assertEqual(table.percentile([0., 2., 4.], .25), 1.)
+        self.assertIsNone(table.bootstrap([], 7, 3)); self.assertEqual(table.percentile([0., 2., 4.], .25), 1.)
 
 
     def test_cli_aggregate_end_to_end_without_models(self):

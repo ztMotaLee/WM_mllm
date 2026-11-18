@@ -33,6 +33,37 @@ def canonical_json(value: Any) -> bytes:
                       separators=(',', ':'), allow_nan=False).encode('utf-8')
 
 
+def canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def rgb_array(image: Any) -> np.ndarray:
+    """Read RGB pixels without resizing. Paths, PIL, and uint8 arrays work."""
+    if isinstance(image, (str, Path)):
+        with Image.open(image) as source:
+            return np.asarray(source.convert('RGB')).copy()
+    if isinstance(image, Image.Image):
+        return np.asarray(image.convert('RGB')).copy()
+    array = np.asarray(image)
+    if array.ndim != 3 or array.shape[2] not in (3, 4) or array.dtype != np.uint8:
+        raise ValueError('image must contain uint8 RGB/RGBA pixels')
+    return np.ascontiguousarray(array[..., :3])
+
+
+def pixel_sha256(image: Any) -> str:
+    array = rgb_array(image)
+    digest = hashlib.sha256(f'RGB uint8 {array.shape[1]} {array.shape[0]}\n'.encode('ascii'))
+    digest.update(memoryview(array).cast('B'))
+    return digest.hexdigest()
+
+
+def array_sha256(value: np.ndarray) -> str:
+    array = np.ascontiguousarray(value)
+    digest = hashlib.sha256(f'{array.dtype.str} {array.shape}\n'.encode('ascii'))
+    digest.update(memoryview(array).cast('B'))
+    return digest.hexdigest()
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -61,7 +92,7 @@ def resolve_run_path(run_root: Path, relative_path: str, *, must_exist: bool = T
             if ancestor.is_symlink() and not ancestor.exists():
                 raise IntegrityError('Dangling reference: ' + relative_path)
             ancestor = ancestor.parent
-    except (OSError, RuntimeError, ValueError) as error:
+    except (OSError, RuntimeError, ValueError):
         raise IntegrityError('Reference containment failed: ' + relative_path) from None
     return path
 
@@ -84,11 +115,8 @@ def file_ref(path: Path, *, run_root: Path, image: bool = False) -> dict:
     result = {'path': path.relative_to(Path(run_root).resolve()).as_posix(),
               'sha256': sha256_file(path)}
     if image:
-        pixels = np.asarray(Image.open(path).convert('RGB'), dtype=np.uint8)
-        digest = hashlib.sha256(f'RGB uint8 {pixels.shape[1]} {pixels.shape[0]}\n'.encode('ascii'))
-        digest.update(pixels.tobytes())
-        result.update(pixel_sha256=digest.hexdigest(),
-                      size=[pixels.shape[1], pixels.shape[0]])
+        pixels = rgb_array(path)
+        result.update(pixel_sha256=pixel_sha256(pixels), size=[pixels.shape[1], pixels.shape[0]])
     return result
 
 
@@ -114,9 +142,7 @@ def verify_ref(ref: Mapping, *, run_root: Path) -> Path:
             raise IntegrityError('Pixel hash or size mismatch: ' + ref['path'])
     if 'array_sha256' in ref:
         array = np.load(path, allow_pickle=False)
-        digest = hashlib.sha256(f'{array.dtype.str} {array.shape}\n'.encode('ascii'))
-        digest.update(np.ascontiguousarray(array).tobytes())
-        if (digest.hexdigest() != ref['array_sha256'] or
+        if (array_sha256(array) != ref['array_sha256'] or
                 list(array.shape) != ref.get('shape') or str(array.dtype) != ref.get('dtype')):
             raise IntegrityError('Array hash or shape mismatch: ' + ref['path'])
     if 'panorama_state_sha256' in ref:
@@ -150,14 +176,12 @@ def _write(path: Path, value: Any, *, run_root: Path, immutable: bool) -> dict:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2,
                          allow_nan=False) + '\n'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path = _local(path, run_root=run_root, must_exist=False)
     temporary = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('x', encoding='utf-8') as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        _local(path, run_root=run_root, must_exist=False)
         if immutable:
             try:
                 os.link(temporary, path)
@@ -187,14 +211,12 @@ def write_once(path: Path, value: Any, *, run_root: Path) -> dict:
 def write_bytes_once(path: Path, value: bytes, *, run_root: Path, image: bool = False) -> dict:
     path = _local(path, run_root=run_root, must_exist=False)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path = _local(path, run_root=run_root, must_exist=False)
     temporary = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with temporary.open('xb') as stream:
             stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
-        _local(path, run_root=run_root, must_exist=False)
         try:
             os.link(temporary, path)
         except FileExistsError:
@@ -226,27 +248,15 @@ def save_png(path: Path, pixels: Any, *, run_root: Path) -> dict:
 
 
 @contextmanager
-def file_lock(path: Path, *, run_root: Path, blocking: bool = True):
+def file_lock(path: Path, *, run_root: Path):
     path = _local(path, run_root=run_root, must_exist=False)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path = _local(path, run_root=run_root, must_exist=False)
     with path.open('a+') as stream:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
-def save_pending(path: Path, packet: Mapping, *, run_root: Path) -> dict:
-    return write_once(path, dict(packet), run_root=run_root)
-
-
-def recover_pending(path: Path, *, session) -> dict | None:
-    path = _local(path, run_root=session.run_root, must_exist=False)
-    if not path.exists():
-        return None
-    return session._recover_packet(read_json(path, run_root=session.run_root), path)
 
 
 _ROOT_FIELDS = {'schema', 'session_id', 'title', 'seed', 'status', 'state_authority',
@@ -261,7 +271,7 @@ _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,79}')
 
 
 def validate_session(value: Mapping, *, run_root: Path, verify_assets: bool = True) -> dict:
-    """Validate the v1 viewer handoff and its authoritative asset references."""
+    """Validate the v1 session record and its authoritative asset references."""
     def require(condition, reason):
         if not condition:
             raise IntegrityError('Invalid session: ' + reason)
@@ -309,14 +319,12 @@ def validate_session(value: Mapping, *, run_root: Path, verify_assets: bool = Tr
         require(identifier(tid) and tid not in tids and transition['index'] == index, 'transition ID/index')
         tids.add(tid)
         require(transition['from_node_id'] == current, 'transition continuity')
-        require(transition['status'] in ('accepted', 'held', 'failed'), 'transition status')
+        require(transition['status'] in ('accepted', 'held'), 'transition status')
         if transition['status'] == 'accepted':
             require(transition['to_node_id'] in nodes, 'accepted node')
             current = transition['to_node_id']
-        elif transition['status'] == 'held':
-            require(transition['to_node_id'] == current, 'held node')
         else:
-            require(transition['to_node_id'] is None, 'failed node')
+            require(transition['to_node_id'] == current, 'held node')
         require(all(op in ('rotate', 'revisit', 'navigate', 'local_edit', 'global_change', 'subject_action') for op in transition['operations']), 'operations')
         semantic = transition['semantic']
         require(set(semantic) == {'status','attempt_count','semantic_accepted','uncertain_accepted_and_labeled','verification'}, 'semantic fields')
@@ -339,9 +347,8 @@ def validate_session(value: Mapping, *, run_root: Path, verify_assets: bool = Tr
             require(presentation['duration_seconds'] == presentation['num_frames'] / presentation['fps'], 'presentation duration')
         if transition['decision'] is not None:
             asset(transition['decision'])
-        if transition['memory_after'] is not None:
-            asset(transition['memory_after'])
-        require(transition['status'] == 'failed' or transition['memory_after'] is not None, 'memory after')
+        require(transition['memory_after'] is not None, 'memory after')
+        asset(transition['memory_after'])
     require(current == value['current_node_id'], 'settled current node')
     asset(value['memory'])
     return dict(value)

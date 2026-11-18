@@ -104,17 +104,16 @@ def safe_error(error: BaseException, secrets: Iterable[str] = ()) -> str:
 class RedactingFilter(logging.Filter):
     """Sanitize before any handler sees a record, including captured exceptions."""
 
-    def __init__(self, secrets: Iterable[str] = (), *, suppress_payloads: bool = False) -> None:
+    def __init__(self, secrets: Iterable[str] = ()) -> None:
         super().__init__()
         self.secrets = tuple(secrets)
-        self.suppress_payloads = suppress_payloads
 
     def filter(self, record: logging.LogRecord) -> bool:
         # SDK debug records can contain full requests and returned payloads.
         provider_record = record.name in ("openai", "httpx", "httpcore") or record.name.startswith(
             ("openai.", "httpx.", "httpcore.")
         )
-        if self.suppress_payloads and provider_record:
+        if provider_record:
             if record.levelno < logging.WARNING:
                 return False
             record.msg = "Provider transport diagnostic; details omitted"
@@ -141,69 +140,27 @@ class RedactingFilter(logging.Filter):
         return True
 
 
-def _attach(logger: logging.Logger, secrets: Iterable[str], *, suppress_payloads: bool = False) -> None:
-    secrets = tuple(secrets)
-    for current in logger.filters:
-        if isinstance(current, RedactingFilter):
-            current.secrets = tuple(set(current.secrets) | set(secrets))
-            current.suppress_payloads = current.suppress_payloads or suppress_payloads
-            return
-    logger.addFilter(RedactingFilter(secrets, suppress_payloads=suppress_payloads))
-
-
-def get_logger(name: str = "wmmllm", secrets: Iterable[str] = ()) -> logging.Logger:
-    """Return a filtered logger without installing handlers or changing levels."""
-    logger = logging.getLogger(name)
-    _attach(logger, secrets)
-    return logger
-
-
-def protect_provider_logs(secrets: Iterable[str] = ()) -> None:
-    """Suppress SDK payload diagnostics and redact emitted transport warnings.
-
-    The factory invokes this after importing the SDK, before client construction.
-    Filtering runs at dispatch so later child loggers and handlers are covered.
-    """
-    _protect_log_dispatch(secrets)
-    names = {"openai", "httpx", "httpcore"}
-    names.update(name for name in logging.Logger.manager.loggerDict
-                 if name.startswith(("openai.", "httpx.", "httpcore.")))
-    for name in names:
-        _attach(logging.getLogger(name), secrets, suppress_payloads=True)
-    for handler in logging.getLogger().handlers:
-        # Handler filtering also covers later-created SDK child loggers.
-        if not any(isinstance(f, RedactingFilter) for f in handler.filters):
-            handler.addFilter(RedactingFilter(secrets, suppress_payloads=True))
-        else:
-            for current in handler.filters:
-                if isinstance(current, RedactingFilter):
-                    current.secrets = tuple(set(current.secrets) | set(secrets))
-                    current.suppress_payloads = True
-
-
 _DISPATCH_LOCK = threading.RLock()
-_DISPATCH_FILTER = RedactingFilter(suppress_payloads=True)
+_DISPATCH_FILTER = RedactingFilter()
 _DISPATCH_INSTALLED = False
 
 
-def _protect_log_dispatch(secrets: Iterable[str]) -> None:
-    """Guard Logger dispatch, which also precedes handlers created later.
+def get_logger(name: str = "wmmllm", secrets: Iterable[str] = ()) -> logging.Logger:
+    """Return a logger whose records are redacted at dispatch; no handlers or levels change.
 
-    Ancestor logger filters do not see propagated child records. A handler
-    filter only covers handlers that already exist. Dispatch filtering sees
-    the complete record, including extra fields, before any handler uses it.
-    The existing dispatch function and unrelated logging behavior are retained.
+    The filter runs in Logger.callHandlers, which also covers SDK, child loggers
+    and handlers added later, and suppresses SDK payload diagnostics.
     """
     global _DISPATCH_INSTALLED
     with _DISPATCH_LOCK:
         _DISPATCH_FILTER.secrets = tuple(set(_DISPATCH_FILTER.secrets) | set(secrets))
-        if _DISPATCH_INSTALLED:
-            return
-        previous = logging.Logger.callHandlers
+        if not _DISPATCH_INSTALLED:
+            previous = logging.Logger.callHandlers
 
-        def protected_dispatch(logger: logging.Logger, record: logging.LogRecord) -> None:
-            if _DISPATCH_FILTER.filter(record):
-                previous(logger, record)
+            def protected_dispatch(logger: logging.Logger, record: logging.LogRecord) -> None:
+                if _DISPATCH_FILTER.filter(record):
+                    previous(logger, record)
 
-        logging.Logger.callHandlers = protected_dispatch
-        _DISPATCH_INSTALLED = True
+            logging.Logger.callHandlers = protected_dispatch
+            _DISPATCH_INSTALLED = True
+    return logging.getLogger(name)

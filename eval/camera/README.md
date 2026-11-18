@@ -71,7 +71,7 @@ at the stated commit. It does not download models or install packages.
 Create an **isolated evaluation environment** for DA3, which requires
 `numpy<2`. Install that checkout's declared dependencies and the MBench
 evaluation requirements; do not combine it with a NumPy 2 core environment.
-`requirements-analysis.txt` is sufficient to analyze saved poses and run the
+The core NumPy installation is sufficient to analyze saved poses and run the
 synthetic numerical tests. Analysis also passed in the release development
 environment with NumPy 2; that check does not validate DA3 inference there.
 

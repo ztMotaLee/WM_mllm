@@ -1,5 +1,4 @@
 """Ordered images, endpoint schema correction and source-bound retry contracts."""
-from pathlib import Path
 from types import SimpleNamespace
 import json
 import numpy as np
@@ -25,7 +24,7 @@ def refs(tmp_path):
 
 def request(tmp_path):
     source,pano,memory=refs(tmp_path)
-    return planning.SegmentRequest('interactive','case','case',0,1,0,'Paint the cup blue.',(),source,'official_initial_letterboxed',{},memory,None,None,{},5.,tmp_path),pano
+    return planning.SegmentRequest(1,'Paint the cup blue.',(),source,{},memory,None,5.,tmp_path),pano
 
 
 def test_request_images_and_policy_text(tmp_path):
@@ -40,27 +39,31 @@ def test_request_images_and_policy_text(tmp_path):
     assert 'EDITING_VIEW' in built.system
 
 
-def test_one_schema_reask_preserves_request(tmp_path):
+@pytest.mark.parametrize('attempt', [1, 2])
+def test_one_schema_reask_preserves_request_and_semantic_attempt(tmp_path, attempt):
+    from dataclasses import replace
     req,pano=request(tmp_path);built=planning.endpoint_request(req,decision=decision(),payload={},editing_crop=req.source,physical_pano_ref=pano)
+    if attempt==2:built=replace(built,payload={**built.payload,'previous_failed_proposal_provenance':{'current_attempt':2}})
     plan={'current_state':'A red cup is on a table.','remaining_action':'Paint the red cup blue.','endpoint_instruction':'A blue cup is on the table.','scope_bbox':[.2,.2,.8,.8],'support_polygons':[[[.2,.2],[.8,.2],[.8,.8],[.2,.8]]],'final_view_entity_bboxes':[]}
     class Chat:
         def __init__(self):self.requests=[]
         def complete(self,r):
-            self.requests.append(r);return ChatResponse('{}' if len(self.requests)==1 else json.dumps(plan),'stop','test',receipt(len(self.requests)))
+            self.requests.append(r);return ChatResponse('{}' if len(self.requests)==1 else json.dumps(plan),'test',receipt(len(self.requests)))
     chat=Chat();out=planning.endpoint_plan(chat=chat,request=built,decision=decision(),caption=req.current_caption,out=tmp_path/'attempt',deps=SimpleNamespace(run_root=tmp_path))
     assert len(chat.requests)==2 and out['scope_bbox']==plan['scope_bbox']
-    assert chat.requests[0].images==chat.requests[1].images
-    assert chat.requests[0].response_format==chat.requests[1].response_format
-    assert chat.requests[1].payload['technical_schema_correction']['does_not_consume_semantic_retry']
+    assert chat.requests[0].images==chat.requests[1].images; assert chat.requests[0].response_format==chat.requests[1].response_format
+    correction=chat.requests[1].payload['technical_schema_correction']
+    assert correction['does_not_consume_semantic_retry'] and correction['semantic_attempt']==attempt
 
 
 def test_invalid_schema_second_response_raises(tmp_path):
     req,pano=request(tmp_path)
     class Chat:
         count=0
-        def complete(self,r):self.count+=1;return ChatResponse('{}','stop','test',receipt())
+        def complete(self,r):self.count+=1;return ChatResponse('{}','test',receipt())
     chat=Chat()
-    with pytest.raises(KeyError):planning.endpoint_plan(chat=chat,request=planning.planner_request(req),decision=decision(),caption=req.current_caption,out=tmp_path/'attempt',deps=SimpleNamespace(run_root=tmp_path))
+    built=planning.endpoint_request(req,decision=decision(),payload={},editing_crop=req.source,physical_pano_ref=pano)
+    with pytest.raises(KeyError):planning.endpoint_plan(chat=chat,request=built,decision=decision(),caption=req.current_caption,out=tmp_path/'attempt',deps=SimpleNamespace(run_root=tmp_path))
     assert chat.count==2
 
 
@@ -88,22 +91,7 @@ def test_retry_feedback_binds_actual_source_and_failure(tmp_path):
     v=write_once(tmp_path/'VERIFIER_1.json',sem,run_root=tmp_path)
     prior={'attempt':1,'image':req.source,'endpoint':req.source,'semantic':sem,'verification_ref':v,'verifier_source':req.source,'editor_inputs':[req.source],'editor_receipt':receipt().to_record(),'verifier_receipt':receipt().to_record()}
     feedback=contracts.build_feedback(current_attempt=2,attempts=[prior],stage=tmp_path,constraints=c,actual_editor_source=req.source,navigation=False,run_root=tmp_path)
-    base=planning.planner_request(req);new=contracts.planner_feedback(base,feedback,c,run_root=tmp_path)
-    assert len(new.images)==3 and [i.label for i in new.images[-2:]]==['actual rejected attempt1 benchmark endpoint','actual rejected attempt1 raw image proposal']
+    base=planning.endpoint_request(req,decision=d,payload={},editing_crop=req.source,physical_pano_ref=pano)
+    new=contracts.planner_feedback(base,feedback,run_root=tmp_path)
+    assert len(new.images)==len(base.images)+2 and [i.label for i in new.images[-2:]]==['actual rejected attempt1 benchmark endpoint','actual rejected attempt1 raw image proposal']
     with pytest.raises(ValueError,match='different accepted physical'):contracts.build_feedback(current_attempt=2,attempts=[prior],stage=tmp_path,constraints=c,actual_editor_source=pano,navigation=False,run_root=tmp_path)
-
-
-def test_schema_reask_keeps_second_semantic_attempt_number(tmp_path):
-    from dataclasses import replace
-    req,pano=request(tmp_path)
-    built=planning.endpoint_request(req,decision=decision(),payload={},editing_crop=req.source,physical_pano_ref=pano)
-    built=replace(built,payload={**built.payload,'previous_failed_proposal_provenance':{'current_attempt':2}})
-    answer={'current_state':'A red cup is on a table.','remaining_action':'Paint the red cup blue.','endpoint_instruction':'A blue cup is on the table.','scope_bbox':[0,0,1,1],'support_polygons':[[[0,0],[1,0],[1,1],[0,1]]],'final_view_entity_bboxes':[]}
-    class Chat:
-        def __init__(self):self.requests=[]
-        def complete(self,r):
-            self.requests.append(r)
-            return ChatResponse('{}' if len(self.requests)==1 else json.dumps(answer),'stop','test',receipt(len(self.requests)))
-    chat=Chat()
-    planning.endpoint_plan(chat=chat,request=built,decision=decision(),caption=req.current_caption,out=tmp_path/'attempt',deps=SimpleNamespace(run_root=tmp_path))
-    assert chat.requests[1].payload['technical_schema_correction']['semantic_attempt']==2

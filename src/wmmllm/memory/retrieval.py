@@ -1,7 +1,5 @@
 """Observed fact context and at most one current historical image."""
 from __future__ import annotations
-import copy
-import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 from . import facts
@@ -15,9 +13,6 @@ def _plain(value):
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
     return value
-
-STATE_NAMES = ('start', 'end')
-
 
 @dataclass(frozen=True)
 class MemoryContext:
@@ -83,9 +78,8 @@ def _initial_view(snapshot: MemorySnapshot, source: FileRef) -> HistoryReference
 
 
 def retrieve(store: MemoryStore, *, segment: int, caption: str, source: FileRef,
-             preceding_captions: Sequence[str], text_purpose: str) -> MemoryContext:
-    """Context for the next uncommitted segment, whose source must be S_1 or the last accepted E;
-    ``text_purpose`` is config memory.text_purpose."""
+             preceding_captions: Sequence[str]) -> MemoryContext:
+    """Context for the next uncommitted segment, whose source must be S_1 or the last accepted E."""
     if not isinstance(caption, str) or not caption.strip() or len(caption) > 10000:
         raise ValueError('current caption must be a nonempty string of at most 10000 characters')
     snapshot = store.snapshot()
@@ -97,10 +91,7 @@ def retrieve(store: MemoryStore, *, segment: int, caption: str, source: FileRef,
             segment, 'official initial state' if segment == 1 else 'accepted endpoint of segment %d' % (segment - 1)))
     if list(preceding_captions) != [c['caption'] for c in snapshot.commits]:
         raise MemoryConflict('Preceding captions differ from the committed segments')
-    world = snapshot.world()
-    text = facts.memory_context(world, store.scene_id, None, text_purpose)
-    if world.memory['facts'] and not text:
-        raise RuntimeError('Fact store returned empty text for a nonempty memory')
+    text = facts.memory_context(snapshot.world_memory)
     eligible, excluded = _candidates(snapshot, source)
     initial_requested = facts.asks_initial_view(caption)
     if initial_requested:
@@ -116,28 +107,3 @@ def retrieve(store: MemoryStore, *, segment: int, caption: str, source: FileRef,
     return MemoryContext(segment, dict(source), tuple(preceding_captions), text, reference, selection,
                          snapshot.sha256)
 
-
-def planner_payload(context: MemoryContext, scene_context: Mapping[str, Any] | None, perspective: str | None,
-                    prefix_template: str) -> dict:
-    """Memory part of the planner/verifier payload; no file path reaches the model.
-
-    With an official scene context the text is the prefix template (prompts/scene_context_prefix.txt,
-    fields scene_json and perspective) followed by the memory text, as controller.py:456-459 with
-    the label "Accepted end-state memory:".
-    """
-    text = context.memory_text
-    if scene_context:
-        text = prefix_template.format(scene_json=json.dumps(scene_context, ensure_ascii=False),
-                                      perspective=str(perspective)) + text
-    history = context.historical_reference
-    return {'memory_text': text, 'target_segment': context.target_segment,
-            'historical_reference': None if history is None else {
-                'segment': history.segment, 'state': STATE_NAMES[history.state_index], 'role': history.role}}
-
-
-def known_subjects(store: MemoryStore, segment: int) -> Mapping[str, Any]:
-    return store.known_subjects(segment)
-
-
-def spatial_anchors(store: MemoryStore) -> Sequence[Mapping[str, Any]]:
-    return copy.deepcopy(store.snapshot().world_memory.get("spatial_anchors", []))

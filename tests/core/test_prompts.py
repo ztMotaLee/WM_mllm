@@ -18,8 +18,6 @@ def test_all_prompt_resources_have_checked_bytes():
     ('先展示房间，然后切换到下一个镜头。',True)])
 def test_explicit_shots_only(caption,multi):
     assert policy.explicit_multiple_shots(caption) is multi
-    schema=policy.planner_response_format(caption)['json_schema']['schema']
-    assert ('h3_shots' in schema['required']) is multi
 
 
 def test_policy_preserves_current_caption_and_action():
@@ -32,8 +30,8 @@ def test_policy_preserves_current_caption_and_action():
 
 def test_semantic_uncertain_is_labeled_and_fail_wins():
     v={k:'pass' for k in policy.SEMANTIC_FIELDS};v['reason']='Visible evidence.'
-    v['state_matches_source']='uncertain';d=policy.semantic_decision(v,True)
-    assert d['semantic_status']=='UNCERTAIN' and d['continuation_allowed'] and not d['semantic_accepted']
-    v['endpoint_matches_action']='fail';d=policy.semantic_decision(v,True)
-    assert d['semantic_status']=='FAIL' and not d['continuation_allowed']
-    with pytest.raises(ValueError):policy.semantic_decision(v,1)
+    v['state_matches_source']='uncertain';d=policy.semantic_decision(v)
+    assert d['semantic_status']=='UNCERTAIN' and d['uncertain_criteria']==['state_matches_source']
+    v['endpoint_matches_action']='fail';d=policy.semantic_decision(v)
+    assert d['semantic_status']=='FAIL' and d['failed_criteria']==['endpoint_matches_action']
+    with pytest.raises(ValueError):policy.validate_semantic_verification({**v,'reason':1})

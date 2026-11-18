@@ -52,7 +52,7 @@ class OfflineProceduralChat:
             if self.observer_errors:raise self.observer_errors.pop(0)
             value={'summary':'The procedural room remains visible.','facts':[{'subject_id':'room','label':'room','key':'appearance','kind':'appearance','value':'geometric tiles','evidence':'Visible tiles in both supplied endpoints.','frame_indices':[0,1]}]}
         else:raise ValueError('Unsupported offline fixture schema: '+name)
-        return ChatResponse(json.dumps(value),'stop','offline-procedural-not-a-model',receipt('chat',request.role,value))
+        return ChatResponse(json.dumps(value),'offline-procedural-not-a-model',receipt('chat',request.role,value))
     def close(self):pass
 
 class OfflineDrawnImageEdit:
@@ -74,5 +74,5 @@ class OfflineDrawnImageEdit:
             draw.rectangle((int(w*.42),int(h*.4),int(w*.58),int(h*.6)),fill=(245,205,40))
         output=Path(request.output_dir);output.mkdir(parents=True,exist_ok=True);path=output/'endpoint.png'
         with path.open('xb') as stream:image.save(stream,format='PNG')
-        return ImageEditResult(path,size,'high','none',receipt('image','editor',{'pixels':hashlib.sha256(np.asarray(image).tobytes()).hexdigest()}))
+        return ImageEditResult(path,receipt('image','editor',{'pixels':hashlib.sha256(np.asarray(image).tobytes()).hexdigest()}))
     def close(self):pass

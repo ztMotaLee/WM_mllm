@@ -1,20 +1,24 @@
 """Observe actual accepted state images; preserve image order and resumable bindings."""
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from .facts import validate_observation
-from .store import checked_path
+from wmmllm.prompts import read_json_data, read_text
 from wmmllm.providers.types import ChatClient, ChatRequest, ImageInput, Usage
 from wmmllm.providers.errors import ProviderError, TransportError
 from wmmllm.providers.retry import raise_if_fatal_provider_error, safe_provider_error
-from wmmllm.session.io import canonical_json, file_ref, verify_ref, read_json, write_once
+from wmmllm.session.io import _local, canonical_sha256, file_ref, verify_ref, read_json, write_once
 
 RESULT_NAME = 'OBSERVATION.json'
+FRAME_INDICES = (0, 1)
+IMAGE_ROLES = ('segment start state (index0)', 'accepted end state (index1)')
+TECHNICAL_RETRIES = 1
+SYSTEM = read_text('observer_system.txt')
+RESPONSE_FORMAT = read_json_data('observer_response_format.json')
 AUXILIARY_NOTE = (' The auxiliary physical views are deterministic crops of the same accepted panorama states. '
     'State index0 includes the auxiliary starting physical view; state index1 includes the auxiliary accepted ending '
     'physical view. A viewer pan may hide the edited object; use these actual state crops to observe physical changes. '
@@ -24,13 +28,6 @@ AUXILIARY_NOTE = (' The auxiliary physical views are deterministic crops of the 
 @dataclass(frozen=True)
 class ObserverDeps:
     chat: ChatClient
-    caps: Mapping[str, int]
-    technical_retries: int
-    frame_indices: tuple[int, int]
-    image_roles: tuple[str, str]
-    system: str
-    response_format: Mapping[str, Any]
-    now: Callable[[], float]
     run_root: Path
 
 
@@ -53,10 +50,10 @@ class ObservationResult:
 def observer_request(caption: str, start: Mapping[str, Any], endpoint: Mapping[str, Any],
                      known_subjects: Mapping[str, Any], deps: ObserverDeps) -> ChatRequest:
     payload = {'current_caption_requested_not_observed': caption,
-               'known_subjects': dict(known_subjects), 'frame_indices': list(deps.frame_indices)}
+               'known_subjects': dict(known_subjects), 'frame_indices': list(FRAME_INDICES)}
     images = tuple(ImageInput(verify_ref(ref, run_root=deps.run_root), role, ref['sha256'])
-                   for ref, role in zip((start, endpoint), deps.image_roles))
-    return ChatRequest('observer', deps.system, images, payload, deps.response_format)
+                   for ref, role in zip((start, endpoint), IMAGE_ROLES))
+    return ChatRequest('observer', SYSTEM, images, payload, RESPONSE_FORMAT)
 
 
 def _request_hash(request: ChatRequest, *, run_root: Path) -> str:
@@ -64,7 +61,7 @@ def _request_hash(request: ChatRequest, *, run_root: Path) -> str:
               'images': [{'image': file_ref(image.path, run_root=run_root), 'role': image.label}
                          for image in request.images], 'payload': request.payload,
               'response_format': request.response_format}
-    return hashlib.sha256(canonical_json(record)).hexdigest()
+    return canonical_sha256(record)
 
 
 def _usage_total(usages: Sequence[Usage | None]) -> Usage | None:
@@ -82,15 +79,11 @@ def observe_state(*, task_id: str, segment: int, caption: str, start: Mapping[st
                   deps: ObserverDeps, out_dir: Path,
                   auxiliary_images: Sequence[ImageInput] = ()) -> ObservationResult:
     """Observe once, with one explicit stage technical retry and no inferred facts."""
-    if deps.frame_indices != (0, 1) or len(deps.image_roles) != 2:
-        raise ValueError('Observer requires source index 0 and endpoint index 1')
-    if deps.technical_retries not in (0, 1):
-        raise ValueError('Observer technical retry limit must be zero or one')
-    out_dir = checked_path(out_dir, Path(deps.run_root).resolve(), must_exist=False)
+    out_dir = _local(out_dir, run_root=deps.run_root, must_exist=False)
     result_path = out_dir / RESULT_NAME
     request = observer_request(caption, start, endpoint, known_subjects, deps)
     for image in auxiliary_images:
-        ref = file_ref(checked_path(image.path, Path(deps.run_root).resolve()), run_root=deps.run_root)
+        ref = file_ref(image.path, run_root=deps.run_root)
         if image.sha256 is not None and image.sha256 != ref['sha256']:
             raise ValueError('Observer auxiliary image checksum differs')
     if auxiliary_images:
@@ -125,19 +118,14 @@ def observe_state(*, task_id: str, segment: int, caption: str, start: Mapping[st
                              out_dir=selected, auxiliary_images=auxiliary_images)
     observation, error, retries, calls = None, None, 0, 0
     usages, receipts = [], []
-    cap = min(2, int(deps.caps.get('chat', 2)))
     while observation is None and error is None:
-        if calls >= cap:
-            error = {'kind': 'call_cap', 'class': 'ObserverCallCapExceeded',
-                     'message': 'Observer stage chat cap exceeded'}
-            break
         calls += 1
         try:
             response = deps.chat.complete(request)
             usages.append(response.usage)
             receipts.append(response.receipt.to_record())
             try:
-                observation = validate_observation(json.loads(response.text), deps.frame_indices)
+                observation = validate_observation(json.loads(response.text), FRAME_INDICES)
             except (ValueError, TypeError, KeyError):
                 error = {'kind': 'output', 'class': 'InvalidObservation',
                          'message': 'Observer output failed the observation schema'}
@@ -146,7 +134,7 @@ def observe_state(*, task_id: str, segment: int, caption: str, start: Mapping[st
             usages.append(exc.usage)
             if exc.receipt is not None:
                 receipts.append(exc.receipt.to_record())
-            if isinstance(exc, TransportError) and retries < deps.technical_retries:
+            if isinstance(exc, TransportError) and retries < TECHNICAL_RETRIES:
                 retries += 1
             else:
                 error = {'kind': exc.kind, **safe_provider_error(exc),
@@ -155,7 +143,7 @@ def observe_state(*, task_id: str, segment: int, caption: str, start: Mapping[st
     value = {'schema': 'wmmllm.observation.v1', 'status': 'OBSERVED' if error is None else 'ERROR',
              'task_id': task_id, 'segment': segment, 'current_caption': caption,
              'frames': [{'index': index, 'image': dict(ref)}
-                        for index, ref in zip(deps.frame_indices, (start, endpoint))],
+                        for index, ref in zip(FRAME_INDICES, (start, endpoint))],
              'known_subjects': dict(known_subjects), 'request_sha256': binding,
              'observation': observation, 'technical_retries': retries,
              'usage': None if usage is None else usage.to_record(),
