@@ -22,7 +22,7 @@ authors:
 version: 0.1.1
 license: Apache-2.0
 repository-code: "https://github.com/ztMotaLee/WM_mllm"
-url: "https://baiangli.com/wmmllm/"
+url: "https://ztmotalee.github.io/wmmllm/"
 # identifiers: add the arXiv identifier after it is assigned.
 preferred-citation:
   type: report
@@ -45,4 +45,4 @@ preferred-citation:
       given-names: Juanxi
     - family-names: Heide
       given-names: Felix
-  url: "https://baiangli.com/wmmllm/"
+  url: "https://ztmotalee.github.io/wmmllm/"

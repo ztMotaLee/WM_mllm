@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://baiangli.com/wmmllm/"
+Homepage = "https://ztmotalee.github.io/wmmllm/"
 Repository = "https://github.com/ztMotaLee/WM_mllm"
 Issues = "https://github.com/ztMotaLee/WM_mllm/issues"
 
