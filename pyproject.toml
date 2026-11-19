@@ -22,6 +22,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://ztmotalee.github.io/wmmllm/"
+Paper = "https://arxiv.org/pdf/2611.24193"
 Repository = "https://github.com/ztMotaLee/WM_mllm"
 Issues = "https://github.com/ztMotaLee/WM_mllm/issues"
 

@@ -6,7 +6,7 @@ Baiang&nbsp;Li<sup>1,3</sup> · Enze&nbsp;Xie<sup>2,&dagger;</sup> · Jincheng&n
 
 <sup>1</sup>Princeton&nbsp;University &emsp; <sup>2</sup>NVIDIA &emsp; <sup>3</sup>OpenEnvision<br><sup>&dagger;</sup>Project Lead
 
-<a href="https://ztmotalee.github.io/wmmllm/#play"><img src="https://img.shields.io/badge/Play-in_the_browser-2ea44f" alt="Play the worlds in the browser"></a> <a href="https://ztmotalee.github.io/wmmllm/"><img src="https://img.shields.io/badge/Project-Page-0969da" alt="Project page"></a> <a href="https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf"><img src="https://img.shields.io/badge/Technical_Report-PDF-b31b1b" alt="Technical report (PDF)"></a> <a href="https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/Code-v0.1.1-1f6feb" alt="Code release v0.1.1"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+<a href="https://ztmotalee.github.io/wmmllm/#play"><img src="https://img.shields.io/badge/Play-in_the_browser-2ea44f" alt="Play the worlds in the browser"></a> <a href="https://ztmotalee.github.io/wmmllm/"><img src="https://img.shields.io/badge/Project-Page-0969da" alt="Project page"></a> <a href="https://arxiv.org/pdf/2611.24193"><img src="https://img.shields.io/badge/Technical_Report-PDF-b31b1b" alt="Technical report (PDF)"></a> <a href="https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.1"><img src="https://img.shields.io/badge/Code-v0.1.1-1f6feb" alt="Code release v0.1.1"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 
 <a href="#one-state-three-requests">Requests</a> &nbsp;·&nbsp; <a href="#worlds">Worlds</a> &nbsp;·&nbsp; <a href="#one-world-twenty-requests">Long session</a> &nbsp;·&nbsp; <a href="#results">Results</a> &nbsp;·&nbsp; <a href="#how-it-works">How it works</a> &nbsp;·&nbsp; <a href="#run-it-yourself">Run it yourself</a> &nbsp;·&nbsp; <a href="#citation">Citation</a>
 
@@ -34,7 +34,7 @@ Baiang&nbsp;Li<sup>1,3</sup> · Enze&nbsp;Xie<sup>2,&dagger;</sup> · Jincheng&n
 
 - **2026-11-18:** Code release [v0.1.1](https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.1): the minimal implementation; you supply the API endpoint, key and models.
 - **2026-11-13:** Code release [v0.1.0](https://github.com/ztMotaLee/WM_mllm/releases/tag/v0.1.0).
-- **2026-11:** The [technical report](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf) is released.
+- **2026-11:** The [technical report](https://arxiv.org/pdf/2611.24193) is released.
 
 ## One state, three requests
 
@@ -157,7 +157,7 @@ In this round trip, Infinite‑World and Yume‑1.5 bring the camera back to abo
 | LingBot‑World | 0.1 | 2.1 | 89.6 | 85.1 | 0.4 |
 | **WM<sup>MLLM</sup>** | **91.5** | **92.2** | **99.4** | **99.3** | **85.3** |
 
-<sub><b>MBench-A environment recovery and camera return.</b> Means on 224 common items, scored with one evaluator version. [Table 3 of the technical report](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf#page=11) adds 95% bootstrap intervals, camera motion and blind frame judgments by Claude Opus 5.5; one baseline has higher camera motion.</sub>
+<sub><b>MBench-A environment recovery and camera return.</b> Means on 224 common items, scored with one evaluator version. [Table 3 of the technical report](https://arxiv.org/pdf/2611.24193#page=11) adds 95% bootstrap intervals, camera motion and blind frame judgments by Claude Opus 5.5; one baseline has higher camera motion.</sub>
 
 ### Edits stay local
 
@@ -173,7 +173,7 @@ The request adds a fishing rod that drags debris along a riverbed. Direct editin
 
 <br>
 
-**CompBench local editing (n = 2,465).** Baseline scores are those that CompBench reports. Direct editing keeps the whole GPT-Image proposal. The rows include five of the 15 baselines, with the strongest one of every column. [Table 4 of the technical report](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf#page=12) adds the multi-object and implicit-reasoning panels.
+**CompBench local editing (n = 2,465).** Baseline scores are those that CompBench reports. Direct editing keeps the whole GPT-Image proposal. The rows include five of the 15 baselines, with the strongest one of every column. [Table 4 of the technical report](https://arxiv.org/pdf/2611.24193#page=12) adds the multi-object and implicit-reasoning panels.
 
 | Method | LC-T ↑ | LC-I ↑ | PSNR ↑ | SSIM ↑ | LPIPS ↓ |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -185,7 +185,7 @@ The request adds a fishing rod that drags debris along a riverbed. Direct editin
 | Direct editing | 21.729 | 0.832 | 26.760 | 0.898 | 0.064 |
 | **WM<sup>MLLM</sup>** | **21.910** | **0.845** | **30.440** | **0.964** | **0.025** |
 
-**Blind evaluation of composition** ([Figure 7](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf#page=13)). Keeping the whole proposal completes the most instructions, and support selected after generation most often completes the edit without other changes. Claude Opus 5.5 judges the outputs blind to the method, in random order. The judge has no human calibration. Values are percentages of cases. CompBench groups and subtasks are weighted equally. The benchmark run uses the first proposals of the 112 local edits.
+**Blind evaluation of composition** ([Figure 7](https://arxiv.org/pdf/2611.24193#page=13)). Keeping the whole proposal completes the most instructions, and support selected after generation most often completes the edit without other changes. Claude Opus 5.5 judges the outputs blind to the method, in random order. The judge has no human calibration. Values are percentages of cases. CompBench groups and subtasks are weighted equally. The benchmark run uses the first proposals of the 112 local edits.
 
 | Population | Composition | Instruction completed | Completed without other changes |
 | --- | --- | ---: | ---: |
@@ -205,7 +205,7 @@ The request adds a fishing rod that drags debris along a riverbed. Direct editin
 </p>
 <p align="center"><sub><b>The state keeps every earlier change.</b> Saved panorama states of the conservatory session in the same crop: requests 1–20 change pixels only inside the red box, which covers 10.7% of the panorama, and request 21 relights the whole panorama.</sub></p>
 
-Without the revision in the view lookup, 60 of the 198 lookups of the benchmark run (30.3%) would return a view from before a later edit, and each of them passes the hash checks. [Figure 8 of the technical report](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf#page=13) shows this session; [play it ↗](https://ztmotalee.github.io/wmmllm/#play=world11&state=A0).
+Without the revision in the view lookup, 60 of the 198 lookups of the benchmark run (30.3%) would return a view from before a later edit, and each of them passes the hash checks. [Figure 8 of the technical report](https://arxiv.org/pdf/2611.24193#page=13) shows this session; [play it ↗](https://ztmotalee.github.io/wmmllm/#play=world11&state=A0).
 
 ## How it works
 
@@ -343,7 +343,7 @@ python -m pytest -q
 
 ## Limitations
 
-WM<sup>MLLM</sup> does not complete every request, and an error carries forward to the next request. The panorama holds the world around one camera center, so translation and unseen regions require generation. Video presentation adds minutes of latency to each request. [Section 5 of the technical report](https://ztmotalee.github.io/assets/files/wm_mllm_tr.pdf#page=14) gives the details.
+WM<sup>MLLM</sup> does not complete every request, and an error carries forward to the next request. The panorama holds the world around one camera center, so translation and unseen regions require generation. Video presentation adds minutes of latency to each request. [Section 5 of the technical report](https://arxiv.org/pdf/2611.24193#page=14) gives the details.
 
 Historical recovery, pooled diagnostics, multi-turn sessions and CompBench used distinct configurations. Fresh generation is stochastic. Paper numbers are reproduced by scoring the original outputs, rather than by bit-identical regeneration. Original outputs and video generation are not distributed here.
 
@@ -361,6 +361,8 @@ Original code and procedural assets use [Apache-2.0](LICENSE); see [NOTICE](NOTI
   author       = {Li, Baiang and Xie, Enze and Yu, Jincheng and Wang, Jin and Liu, Haozhe and Li, Yitong and Tian, Juanxi and Heide, Felix},
   year         = {2026},
   howpublished = {\url{https://ztmotalee.github.io/wmmllm/}},
-  note         = {Technical report}
+  note         = {Technical report},
+  eprint       = {2611.24193},
+  archivePrefix = {arXiv}
 }
 ```

@@ -23,7 +23,10 @@ version: 0.1.1
 license: Apache-2.0
 repository-code: "https://github.com/ztMotaLee/WM_mllm"
 url: "https://ztmotalee.github.io/wmmllm/"
-# identifiers: add the arXiv identifier after it is assigned.
+identifiers:
+  - type: other
+    value: "arXiv:2611.24193"
+    description: "arXiv identifier of the technical report"
 preferred-citation:
   type: report
   title: "WM^MLLM: Turning MLLMs into World Models"
@@ -45,4 +48,8 @@ preferred-citation:
       given-names: Juanxi
     - family-names: Heide
       given-names: Felix
-  url: "https://ztmotalee.github.io/wmmllm/"
+  url: "https://arxiv.org/abs/2611.24193"
+  identifiers:
+    - type: other
+      value: "arXiv:2611.24193"
+      description: "arXiv identifier of the technical report"
