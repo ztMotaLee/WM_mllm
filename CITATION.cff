@@ -28,8 +28,9 @@ identifiers:
     value: "arXiv:2611.24193"
     description: "arXiv identifier of the technical report"
 preferred-citation:
-  type: report
+  type: article
   title: "WM^MLLM: Turning MLLMs into World Models"
+  journal: "arXiv preprint arXiv:2611.24193"
   year: 2026
   authors:
     - family-names: Li

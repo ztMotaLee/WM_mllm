@@ -356,13 +356,10 @@ Original code and procedural assets use [Apache-2.0](LICENSE); see [NOTICE](NOTI
 ## Citation
 
 ```bibtex
-@misc{li2026wmmllm,
-  title        = {{WM$^{\mathrm{MLLM}}$}: Turning {MLLMs} into World Models},
-  author       = {Li, Baiang and Xie, Enze and Yu, Jincheng and Wang, Jin and Liu, Haozhe and Li, Yitong and Tian, Juanxi and Heide, Felix},
-  year         = {2026},
-  howpublished = {\url{https://ztmotalee.github.io/wmmllm/}},
-  note         = {Technical report},
-  eprint       = {2611.24193},
-  archivePrefix = {arXiv}
+@article{li2026wmmllm,
+  title   = {{WM$^{\mathrm{MLLM}}$}: Turning {MLLMs} into World Models},
+  author  = {Li, Baiang and Xie, Enze and Yu, Jincheng and Wang, Jin and Liu, Haozhe and Li, Yitong and Tian, Juanxi and Heide, Felix},
+  journal = {arXiv preprint arXiv:2611.24193},
+  year    = {2026}
 }
 ```
